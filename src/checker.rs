@@ -1,7 +1,7 @@
-use j4rs::Instance;
+use j4rs::{errors::Result, Instance};
 
 /// Checker
-trait Checker {
+pub trait Checker {
     /// The check function, returns a map like `{:valid? true}`
-    fn check(history: Instance, test_ctx: Option<()>, checker_opts: Option<()>) -> Instance;
+    fn check(history: Instance) -> Result<Instance>;
 }

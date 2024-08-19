@@ -3,61 +3,21 @@
 mod checker;
 mod context;
 mod generator;
+mod history;
 mod jtests;
+mod op;
 pub mod utils;
 use std::{borrow::Borrow, cell::RefCell};
+#[macro_use]
+pub mod macros;
 
 use j4rs::{Instance, InvocationArg, Jvm};
-
-/// Reads data in the edn format
-#[macro_export]
-macro_rules! cljread {
-    ($($char:tt)*) => {
-        read(stringify!($($char)*))
-    };
-}
-
-/// Evaluate the string
-#[macro_export]
-macro_rules! cljeval {
-    ($($char:tt)*) => {
-        eval(stringify!($($char)*))
-    };
-}
-
-/// Invoke a clojure class method
-#[macro_export]
-macro_rules! cljinvoke {
-    ($name:expr) => {
-        invoke_clojure_class($name, &[])
-    };
-    ($name:expr, $($args:expr),*) => {
-        || -> j4rs::errors::Result<Instance> {
-            invoke_clojure_class($name, &[$(InvocationArg::try_from($args)?),*])
-        } ()
-    };
-}
-
-/// Invoke a clojure class method
-#[macro_export]
-macro_rules! nsinvoke {
-    ($ns:expr, $var:expr) => {
-        || -> j4rs::errors::Result<Instance> {
-            $ns.var($var)?.invoke(&[] as &[InvocationArg])
-        } ()
-    };
-    ($ns:expr, $var:expr, $($args:expr),*) => {
-        || -> j4rs::errors::Result<Instance> {
-            $ns.var($var)?.invoke(&[$(InvocationArg::try_from($args)?),*])
-        } ()
-    };
-}
 
 thread_local! {
     static JVM: RefCell<Option<Jvm>> = const { RefCell::new(None) };
 }
 
-fn with_jvm<F, R>(f: F) -> R
+pub fn with_jvm<F, R>(f: F) -> R
 where
     F: FnOnce(&Jvm) -> R,
 {
@@ -72,16 +32,10 @@ where
 }
 
 pub fn read(arg: &str) -> Instance {
-    cljinvoke!("read", arg).unwrap()
+    cljinvoke_java_api!("read", arg).unwrap()
 }
 
-/// eval the given clojure string
-pub fn eval(arg: &str) -> j4rs::errors::Result<Instance> {
-    let clj = CljCore::new();
-    nsinvoke!(clj, "load-string", arg)
-}
-
-pub fn invoke_clojure_class(
+fn invoke_clojure_java_api(
     method_name: &str,
     inv_args: &[impl Borrow<InvocationArg>],
 ) -> j4rs::errors::Result<Instance> {
@@ -136,7 +90,7 @@ impl CljNs {
 
     fn var_inner(ns: &str, name: &str) -> j4rs::errors::Result<IFn> {
         Ok(IFn {
-            inner: cljinvoke!("var", ns, name)?,
+            inner: cljinvoke_java_api!("var", ns, name)?,
         })
     }
 }
@@ -169,9 +123,9 @@ impl Default for CljCore {
 #[cfg(test)]
 mod test {
     use j4rs::JvmBuilder;
-    use utils::J4rsDie;
+    use utils::{clj_to_string, J4rsDie};
 
-    use self::utils::print_lazy;
+    use self::utils::print_clj;
     use super::*;
     use crate::utils::print;
 
@@ -190,19 +144,21 @@ mod test {
         let jh = h.var("history")?.invoke1(history)?;
         let res = r.var("check")?.invoke1(jh)?;
         print(res);
-
         Ok(())
     }
 
     #[test]
     fn test_elle_gen() -> Result<(), Box<dyn std::error::Error>> {
-        let _jvm = JvmBuilder::new().build()?;
+        let jvm = JvmBuilder::new().build()?;
         let clj = CljCore::new();
         let r = clj.require("elle.rw-register")?;
         let gen = nsinvoke!(r, "gen")?;
-        let t = nsinvoke!(clj, "take", 10, gen)?;
-        print_lazy(t);
-
+        let take = nsinvoke!(clj, "take", 5, gen)?;
+        let value = cljinvoke!("map", cljeval!(#(:value %)), take)?;
+        // print_clj(value);
+        let class = jvm.static_class("java.lang.String")?;
+        let res = clj_to_string(value)?;
+        println!("{}", res);
         Ok(())
     }
 
@@ -211,28 +167,12 @@ mod test {
         let _jvm = JvmBuilder::new().build()?;
         let clj = CljCore::new();
         let r = clj.require("elle.rw-register")?;
-        let g = clj.require("jepsen.generator")?;
+        // let g = clj.require("jepsen.generator")?;
         let h = clj.require("jepsen.history")?;
         let gen = r.var("gen")?.invoke0();
-
-        let history = nsinvoke!(clj, "take", 2, gen)?;
-
-        let assocfn = cljeval!(
-            #(assoc % :new-key :new-value)
-        )?;
-
-        let res = nsinvoke!(clj, "map", assocfn, history)?;
-
-        // let assoc = clj.var("assoc");
-        // clj.var("map").invoke(&[
-        //     InvocationArg::from(assoc.into_inner()),
-        //     Clojure.var("clojure.core", "%"),
-        // ]);
-        print_lazy(res);
-
-        // let res = r.var("check").invoke1(h.var("history").invoke1(history));
-        // print(res);
-
+        let history = nsinvoke!(clj, "take", 10, gen)?;
+        let res = nsinvoke!(r, "check", nsinvoke!(h, "history", history)?)?;
+        print(res);
         Ok(())
     }
 

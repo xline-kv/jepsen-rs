@@ -1,10 +1,7 @@
-#[cfg(test)]
-use j4rs::{Instance, InvocationArg};
+use j4rs::{errors::Result, Instance, InvocationArg};
 
-#[cfg(test)]
-use crate::{with_jvm, CljCore};
+use crate::{cljinvoke, with_jvm, CljCore};
 
-#[cfg(test)]
 pub(crate) fn print(inst: Instance) {
     with_jvm(|jvm| {
         let system_class = jvm.static_class("java.lang.System").unwrap();
@@ -14,15 +11,16 @@ pub(crate) fn print(inst: Instance) {
     })
 }
 
-#[cfg(test)]
-pub(crate) fn print_lazy(inst: Instance) {
-    let clj = CljCore::new();
-    let inst = clj
-        .var("pr-str")
-        .expect("pr-str should exists")
-        .invoke1(inst)
-        .expect("invoke pr-str failed");
-    print(inst);
+pub(crate) fn print_clj(inst: Instance) {
+    println!("{}", clj_to_string(inst).die());
+}
+
+pub fn clj_to_string(inst: Instance) -> Result<String> {
+    with_jvm(|jvm| -> Result<_> {
+        let res = cljinvoke!("pr-str", inst)?;
+        let instance = jvm.cast(&res, "java.lang.String")?;
+        jvm.to_rust(instance)
+    })
 }
 
 /// This trait is for printing error messages better than `unwrap()`

@@ -1,5 +1,5 @@
 group_imports       = "StdExternalCrate"
 imports_granularity = "Crate"
 merge_derives       = true
-unstable_features   = true
+unstable_features   = false
 wrap_comments       = true
