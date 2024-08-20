@@ -123,7 +123,7 @@ impl Default for CljCore {
 #[cfg(test)]
 mod test {
     use j4rs::JvmBuilder;
-    use utils::{clj_to_string, J4rsDie};
+    use utils::{clj_to_string, J4rsDie, JsonSerde};
 
     use self::utils::print_clj;
     use super::*;
@@ -156,9 +156,7 @@ mod test {
         let take = nsinvoke!(clj, "take", 5, gen)?;
         let value = cljinvoke!("map", cljeval!(#(:value %)), take)?;
         // print_clj(value);
-        let class = jvm.static_class("java.lang.String")?;
-        let res = clj_to_string(value)?;
-        println!("{}", res);
+        println!("{}", value.ser()?);
         Ok(())
     }
 

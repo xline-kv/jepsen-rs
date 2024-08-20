@@ -4,4 +4,4 @@
 .clj-kondo
 .lsp
 
-test.edn
+/test.*

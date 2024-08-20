@@ -6,9 +6,11 @@ version = "0.1.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+anyhow = "1.0.86"
 async-trait = "0.1.81"
 j4rs = "0.20.0"
 madsim = "0.2.27"
+serde_json = "1.0.125"
 
 [build-dependencies]
 j4rs = "0.20.0"

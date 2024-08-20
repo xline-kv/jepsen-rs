@@ -14,6 +14,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Top level dependencies:
     // * jepsen 0.3.5
     // * elle 0.2.1
+    // * data.json 2.5.0
     let artifacts = [
         "elle:elle:0.2.1",
         "com.aphyr:bifurcan-clj:0.1.1",
@@ -21,6 +22,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "riddley:riddley:0.2.0",
         "rhizome:rhizome:0.2.9",
         "jepsen:jepsen:0.3.5",
+        "org.clojure:data.json:2.5.0",
         "byte-streams:byte-streams:0.2.5-alpha2",
         "clj-tuple:clj-tuple:0.2.2",
         "manifold:manifold:0.1.8",
@@ -117,6 +119,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "org.clojure:core.specs.alpha:0.2.62",
         "org.clojure:spec.alpha:0.3.218",
         "org.nrepl:incomplete:0.1.0",
+        "org/clojure:pom.contrib:0.2.2",
     ];
 
     for artifact in artifacts {
