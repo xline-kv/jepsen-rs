@@ -4,7 +4,7 @@ use j4rs::{errors::Result as jResult, Instance, InvocationArg};
 use crate::{cljinvoke, nsinvoke, with_jvm, CljCore};
 
 /// print a java instance
-pub(crate) fn print(inst: Instance) {
+pub fn print(inst: Instance) {
     with_jvm(|jvm| {
         let system_class = jvm.static_class("java.lang.System").unwrap();
         let system_out_field = jvm.field(&system_class, "out").unwrap();
@@ -14,7 +14,7 @@ pub(crate) fn print(inst: Instance) {
 }
 
 /// print a clojure instance
-pub(crate) fn print_clj(inst: Instance) {
+pub fn print_clj(inst: Instance) {
     println!("{}", clj_to_string(inst).die());
 }
 

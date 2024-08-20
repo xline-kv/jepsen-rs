@@ -1,6 +1,7 @@
 use std::fmt::Display;
 
 use anyhow::{anyhow, Result};
+use j4rs::Instance;
 use serde_json::{json, Value};
 
 use crate::utils::JsonSerde;

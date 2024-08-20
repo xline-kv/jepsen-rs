@@ -69,21 +69,22 @@ impl IFn {
         with_jvm(|jvm| jvm.invoke(&self.inner, "invoke", args))
     }
 
+    pub fn get_cls(&self, name: &str) -> j4rs::errors::Result<Instance> {
+        with_jvm(|jvm| jvm.field(&self.inner, name))
+    }
+
     pub fn into_inner(self) -> Instance {
         self.inner
     }
 }
 
-/// Clojure Namespace
+/// Clojure Namespace. A namespace should be created by `CljCore::require`.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CljNs {
     ns: String,
 }
 
 impl CljNs {
-    pub fn new(ns: impl Into<String>) -> Self {
-        Self { ns: ns.into() }
-    }
-
     pub fn var(&self, name: &str) -> j4rs::errors::Result<IFn> {
         Self::var_inner(&self.ns, name)
     }
@@ -95,6 +96,7 @@ impl CljNs {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CljCore {
     ns: &'static str,
 }
@@ -106,7 +108,7 @@ impl CljCore {
 
     pub fn require(&self, ns: &str) -> j4rs::errors::Result<CljNs> {
         CljNs::var_inner(self.ns, "require")?.invoke1(read(ns))?;
-        Ok(CljNs::new(ns.to_string()))
+        Ok(CljNs { ns: ns.to_string() })
     }
 
     pub fn var(&self, name: &str) -> j4rs::errors::Result<IFn> {
@@ -123,7 +125,6 @@ impl Default for CljCore {
 #[cfg(test)]
 mod test {
     use j4rs::JvmBuilder;
-    use utils::{clj_to_string, J4rsDie, JsonSerde};
 
     use self::utils::print_clj;
     use super::*;
@@ -149,14 +150,13 @@ mod test {
 
     #[test]
     fn test_elle_gen() -> Result<(), Box<dyn std::error::Error>> {
-        let jvm = JvmBuilder::new().build()?;
+        let _jvm = JvmBuilder::new().build()?;
         let clj = CljCore::new();
         let r = clj.require("elle.rw-register")?;
         let gen = nsinvoke!(r, "gen")?;
         let take = nsinvoke!(clj, "take", 5, gen)?;
         let value = cljinvoke!("map", cljeval!(#(:value %)), take)?;
-        // print_clj(value);
-        println!("{}", value.ser()?);
+        print_clj(value);
         Ok(())
     }
 
@@ -174,9 +174,13 @@ mod test {
         Ok(())
     }
 
+    /// We can define a function in namespace, and call it later.
     #[test]
-    fn mytest() -> Result<(), Box<dyn std::error::Error>> {
+    fn test_defn_in_ns() -> Result<(), Box<dyn std::error::Error>> {
         let _jvm = JvmBuilder::new().build()?;
+        let _x = cljeval!((defn test [] (str "hello" "world")))?;
+        let y = cljeval!((test))?;
+        print_clj(y);
         Ok(())
     }
 }
