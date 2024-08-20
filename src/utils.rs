@@ -1,7 +1,7 @@
 use anyhow::Result;
 use j4rs::{errors::Result as jResult, Instance, InvocationArg};
 
-use crate::{cljinvoke, nsinvoke, with_jvm, CljCore};
+use crate::{cljeval, cljinvoke, nsinvoke, with_jvm, CljCore};
 
 /// print a java instance
 pub fn print(inst: Instance) {
@@ -76,4 +76,10 @@ impl<T> J4rsDie<T> for j4rs::errors::Result<T> {
             }
         }
     }
+}
+
+/// This fn is to extract the value of generated ops from elle generator.
+/// This function should be called before serialize the Instance.
+pub fn pre_serialize(i: Instance) -> j4rs::errors::Result<Instance> {
+    cljinvoke!("map", cljeval!(#(:value %)), i)
 }

@@ -5,12 +5,17 @@ use j4rs::{Instance, InvocationArg};
 
 use super::{Generator, GENERATOR_CACHE_SIZE};
 use crate::{
-    cljeval, cljinvoke, nseval, nsevalstr, nsinvoke, op::Op, utils::JsonSerde, CljCore, CljNs,
+    cljeval, cljinvoke, nseval, nsevalstr, nsinvoke,
+    op::Op,
+    utils::{pre_serialize, JsonSerde},
+    CljCore, CljNs,
 };
 
 pub struct ElleGenerator {
     /// The namespace of the generator, default is `elle.rw-register`
     ns: CljNs,
+    /// The clojure generator Instance.
+    gen: Mutex<Option<Instance>>,
     /// The cached `Op`s of the generator. Because the clojure generator will
     /// generates infinite sequence, we can take some of them to cache. When the
     /// `Op`s run out, fetch new `Op`s from the clojure generator.
@@ -22,22 +27,43 @@ impl ElleGenerator {
         let ns = CljCore::default().require("elle.rw-register")?;
         Ok(Self {
             ns,
+            gen: Mutex::new(None),
             cache: Vec::with_capacity(GENERATOR_CACHE_SIZE),
         })
     }
 }
 
 impl Generator for ElleGenerator {
+    /// It generates a batch of ops in one time, and reserves the gen `Instance`
+    /// for next time to use.
     fn get_op(&mut self) -> anyhow::Result<Op> {
         if let Some(op) = self.cache.pop() {
             return Ok(op);
         }
-        let gen = self.ns.var("gen")?;
-        let res = cljinvoke!("take", GENERATOR_CACHE_SIZE as i32, gen.invoke0()?)?;
-        let res = cljinvoke!("map", cljeval!(#(:value %)), res)?;
-        let ser = res.ser()?;
-        println!("{}", ser);
-        self.cache = Vec::<Op>::de(&ser)?.into_iter().rev().collect();
+        let mut gen = self.gen.lock().expect("Failed to lock generator");
+        if gen.is_none() {
+            gen.replace(nsinvoke!(self.ns, "gen")?);
+        }
+        let cljgen = gen
+            .take()
+            .unwrap_or_else(|| unreachable!("gen should not be `None` after replacing it"));
+
+        // avoid consuming the ownership of `two_seqs`
+        let two_seqs = [InvocationArg::from(cljinvoke!(
+            "split-at",
+            GENERATOR_CACHE_SIZE as i32,
+            cljgen
+        )?)];
+
+        let first_seq = pre_serialize(CljCore::default().var("first")?.invoke(&two_seqs)?)?;
+        self.cache = Vec::<Op>::de(&first_seq.ser()?)?
+            .into_iter()
+            .rev()
+            .collect();
+
+        let second_seq = CljCore::default().var("second")?.invoke(&two_seqs)?;
+        // update the elle gen
+        gen.replace(second_seq);
         Ok(self
             .cache
             .pop()
@@ -53,11 +79,12 @@ mod test {
     use crate::generator::Generator;
 
     #[test]
-    fn test_elle_gen() -> Result<(), Box<dyn std::error::Error>> {
+    fn elle_gen_should_work() -> Result<(), Box<dyn std::error::Error>> {
         let _jvm = JvmBuilder::new().build()?;
         let mut gen = ElleGenerator::new()?;
-        let op = gen.get_op()?;
-        println!("{:?}", op);
+        for _ in 0..GENERATOR_CACHE_SIZE * 2 + 10 {
+            gen.get_op()?;
+        }
         Ok(())
     }
 }

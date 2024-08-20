@@ -74,7 +74,8 @@ macro_rules! nsinvoke {
     };
 }
 
-/// Invoke a clojure class method from namespace
+/// Invoke a clojure class method from namespace. There still exists a bug in
+/// this macro, so it is **not recommended** to use it.
 /// ```
 /// use j4rs::{JvmBuilder, Instance, InvocationArg};
 /// use jepsen_rs::{nseval, cljeval, CljCore};
