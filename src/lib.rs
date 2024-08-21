@@ -7,14 +7,25 @@ mod history;
 mod jtests;
 mod op;
 pub mod utils;
-use std::{borrow::Borrow, cell::RefCell};
+
+use std::{borrow::Borrow, cell::OnceCell};
+
 #[macro_use]
 pub mod macros;
 
-use j4rs::{Instance, InvocationArg, Jvm};
+use j4rs::{Instance, InvocationArg, Jvm, JvmBuilder};
 
 thread_local! {
-    static JVM: RefCell<Option<Jvm>> = const { RefCell::new(None) };
+    static JVM: OnceCell<Jvm> = const { OnceCell::new() };
+}
+
+pub fn init_jvm() {
+    JVM.with(|cell| {
+        cell.get_or_init(|| {
+            let _jvm = JvmBuilder::new().build().expect("Failed to initialize JVM");
+            Jvm::attach_thread().expect("Failed to attach JVM to thread")
+        });
+    })
 }
 
 pub fn with_jvm<F, R>(f: F) -> R
@@ -22,12 +33,11 @@ where
     F: FnOnce(&Jvm) -> R,
 {
     JVM.with(|cell| {
-        if let Ok(mut jvm) = cell.try_borrow_mut() {
-            if jvm.is_none() {
-                jvm.replace(Jvm::attach_thread().unwrap());
-            }
-        }
-        f(cell.borrow().as_ref().unwrap())
+        let jvm = cell.get_or_init(|| {
+            let _jvm = JvmBuilder::new().build().expect("Failed to initialize JVM");
+            Jvm::attach_thread().expect("Failed to attach JVM to thread")
+        });
+        f(jvm)
     })
 }
 
@@ -131,7 +141,7 @@ mod test {
 
     #[test]
     fn test_elle_check() -> Result<(), Box<dyn std::error::Error>> {
-        let _jvm = JvmBuilder::new().build()?;
+        init_jvm();
         let r = CLOJURE.require("elle.rw-register")?;
         let h = CLOJURE.require("jepsen.history")?;
         let history = read_edn(include_str!("../assets/ex_history.edn"))?;
@@ -143,7 +153,7 @@ mod test {
 
     #[test]
     fn test_elle_gen() -> Result<(), Box<dyn std::error::Error>> {
-        let _jvm = JvmBuilder::new().build()?;
+        init_jvm();
         let r = CLOJURE.require("elle.rw-register")?;
         let gen = nsinvoke!(r, "gen")?;
         let take = cljinvoke!("take", 5, gen)?;
@@ -154,7 +164,7 @@ mod test {
 
     #[test]
     fn elle_gen_analysis() -> Result<(), Box<dyn std::error::Error>> {
-        let _jvm = JvmBuilder::new().build()?;
+        init_jvm();
         let r = CLOJURE.require("elle.rw-register")?;
         let h = CLOJURE.require("jepsen.history")?;
         let gen = r.var("gen")?.invoke0()?;
@@ -167,7 +177,7 @@ mod test {
     /// We can define a function in namespace, and call it later.
     #[test]
     fn test_defn_in_ns() -> Result<(), Box<dyn std::error::Error>> {
-        let _jvm = JvmBuilder::new().build()?;
+        init_jvm();
         let _x = cljeval!((defn test [] (str "hello" "world")))?;
         let y = cljeval!((test))?;
         print_clj(y);

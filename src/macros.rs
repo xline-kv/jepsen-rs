@@ -109,11 +109,11 @@ mod tests {
     use j4rs::JvmBuilder;
 
     use super::*;
-    use crate::{utils::print_clj, CLOJURE};
+    use crate::{init_jvm, utils::print_clj, CLOJURE};
 
     #[test]
     fn mytest() -> Result<(), Box<dyn std::error::Error>> {
-        let _jvm = JvmBuilder::new().build()?;
+        init_jvm();
         let ns = CLOJURE.require("elle.rw-register")?;
         let gen = ns.var("gen")?;
         let res = cljinvoke!("take", 100, gen.invoke0()?)?;

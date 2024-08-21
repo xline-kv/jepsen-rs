@@ -5,7 +5,7 @@ use j4rs::{Instance, InvocationArg};
 
 use super::{Generator, GENERATOR_CACHE_SIZE};
 use crate::{
-    cljeval, cljinvoke, nseval, nsevalstr, nsinvoke,
+    cljeval, cljinvoke, init_jvm, nseval, nsevalstr, nsinvoke,
     op::Op,
     utils::{pre_serialize, JsonSerde},
     CljNs, CLOJURE,
@@ -80,7 +80,7 @@ mod test {
 
     #[test]
     fn elle_gen_should_work() -> Result<(), Box<dyn std::error::Error>> {
-        let _jvm = JvmBuilder::new().build()?;
+        init_jvm();
         let mut gen = ElleRwGenerator::new()?;
         for _ in 0..GENERATOR_CACHE_SIZE * 2 + 10 {
             gen.get_op()?;
