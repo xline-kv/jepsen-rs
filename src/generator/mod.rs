@@ -1,4 +1,4 @@
-mod elle_gen;
+mod elle_rw;
 use std::collections::HashMap;
 
 use madsim::runtime::NodeHandle;

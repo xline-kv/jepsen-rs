@@ -16,11 +16,11 @@ macro_rules! cljread {
 #[macro_export]
 macro_rules! cljinvoke {
     ($name:expr) => {
-        $crate::CljCore::default().var($name).invoke0()
+        $crate::CLOJURE.var($name).invoke0()
     };
     ($name:expr, $($args:expr),*) => {
         || -> j4rs::errors::Result<j4rs::Instance> {
-            $crate::CljCore::default().var($name)?.invoke(&[$(j4rs::InvocationArg::try_from($args)?),*])
+            $crate::CLOJURE.var($name)?.invoke(&[$(j4rs::InvocationArg::try_from($args)?),*])
         } ()
     };
 }
@@ -57,7 +57,7 @@ macro_rules! cljinvoke_java_api {
 /// use j4rs::{JvmBuilder, Instance, InvocationArg};
 /// use jepsen_rs::{nsinvoke, cljeval, CljCore};
 /// let _jvm = JvmBuilder::new().build();
-/// let g = CljCore::default().require("jepsen.generator").unwrap();
+/// let g = CLOJURE.require("jepsen.generator").unwrap();
 /// let res = nsinvoke!(g, "phases", cljeval!({:f :write, :value 3} {:f :read}).unwrap()).unwrap();
 /// ```
 #[macro_export]
@@ -80,7 +80,7 @@ macro_rules! nsinvoke {
 /// use j4rs::{JvmBuilder, Instance, InvocationArg};
 /// use jepsen_rs::{nseval, cljeval, CljCore};
 /// let _jvm = JvmBuilder::new().build();
-/// let g = CljCore::default().require("jepsen.generator").unwrap();
+/// let g = CLOJURE.require("jepsen.generator").unwrap();
 /// let res = nseval!(g, (phases {:f :write, :value 3} {:f :read})).unwrap();
 /// ```
 #[macro_export]
@@ -109,12 +109,12 @@ mod tests {
     use j4rs::JvmBuilder;
 
     use super::*;
-    use crate::{utils::print_clj, CljCore};
+    use crate::{utils::print_clj, CLOJURE};
 
     #[test]
     fn mytest() -> Result<(), Box<dyn std::error::Error>> {
         let _jvm = JvmBuilder::new().build()?;
-        let ns = CljCore::default().require("elle.rw-register")?;
+        let ns = CLOJURE.require("elle.rw-register")?;
         let gen = ns.var("gen")?;
         let res = cljinvoke!("take", 100, gen.invoke0()?)?;
         print_clj(res);

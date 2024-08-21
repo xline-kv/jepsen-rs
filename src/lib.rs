@@ -101,11 +101,9 @@ pub struct CljCore {
     ns: &'static str,
 }
 
-impl CljCore {
-    pub fn new() -> Self {
-        Self::default()
-    }
+pub static CLOJURE: CljCore = CljCore { ns: "clojure.core" };
 
+impl CljCore {
     pub fn require(&self, ns: &str) -> j4rs::errors::Result<CljNs> {
         CljNs::var_inner(self.ns, "require")?.invoke1(read(ns))?;
         Ok(CljNs { ns: ns.to_string() })
@@ -118,13 +116,14 @@ impl CljCore {
 
 impl Default for CljCore {
     fn default() -> Self {
-        Self { ns: "clojure.core" }
+        CLOJURE.clone()
     }
 }
 
 #[cfg(test)]
 mod test {
     use j4rs::JvmBuilder;
+    use utils::pre_serialize;
 
     use self::utils::print_clj;
     use super::*;
@@ -133,9 +132,8 @@ mod test {
     #[test]
     fn test_elle_analysis() -> Result<(), Box<dyn std::error::Error>> {
         let _jvm = JvmBuilder::new().build()?;
-        let clj = CljCore::new();
-        let r = clj.require("elle.rw-register")?;
-        let h = clj.require("jepsen.history")?;
+        let r = CLOJURE.require("elle.rw-register")?;
+        let h = CLOJURE.require("jepsen.history")?;
         let history = cljeval!(
            [{:index 0 :time 0 :type :invoke :process 0 :f :txn :value [[:r 1 nil] [:w 1 2]]}
             {:index 1 :time 1 :type :invoke :process 1 :f :txn :value [[:r 1 nil] [:w 1 3]]}
@@ -151,11 +149,10 @@ mod test {
     #[test]
     fn test_elle_gen() -> Result<(), Box<dyn std::error::Error>> {
         let _jvm = JvmBuilder::new().build()?;
-        let clj = CljCore::new();
-        let r = clj.require("elle.rw-register")?;
+        let r = CLOJURE.require("elle.rw-register")?;
         let gen = nsinvoke!(r, "gen")?;
-        let take = nsinvoke!(clj, "take", 5, gen)?;
-        let value = cljinvoke!("map", cljeval!(#(:value %)), take)?;
+        let take = cljinvoke!("take", 5, gen)?;
+        let value = pre_serialize(take)?;
         print_clj(value);
         Ok(())
     }
@@ -163,12 +160,10 @@ mod test {
     #[test]
     fn elle_gen_analysis() -> Result<(), Box<dyn std::error::Error>> {
         let _jvm = JvmBuilder::new().build()?;
-        let clj = CljCore::new();
-        let r = clj.require("elle.rw-register")?;
-        // let g = clj.require("jepsen.generator")?;
-        let h = clj.require("jepsen.history")?;
+        let r = CLOJURE.require("elle.rw-register")?;
+        let h = CLOJURE.require("jepsen.history")?;
         let gen = r.var("gen")?.invoke0();
-        let history = nsinvoke!(clj, "take", 10, gen)?;
+        let history = cljinvoke!("take", 10, gen)?;
         let res = nsinvoke!(r, "check", nsinvoke!(h, "history", history)?)?;
         print(res);
         Ok(())

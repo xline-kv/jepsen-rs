@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use madsim::runtime::NodeHandle;
 
@@ -15,7 +15,7 @@ pub struct Global {
 #[non_exhaustive]
 pub struct Context {
     /// A timestamp for the operation
-    pub time: u64,
+    pub time: Duration,
     /// The process that performs the operation
     pub process: u64,
 }

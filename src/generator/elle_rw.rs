@@ -8,10 +8,10 @@ use crate::{
     cljeval, cljinvoke, nseval, nsevalstr, nsinvoke,
     op::Op,
     utils::{pre_serialize, JsonSerde},
-    CljCore, CljNs,
+    CljNs, CLOJURE,
 };
 
-pub struct ElleGenerator {
+pub struct ElleRwGenerator {
     /// The namespace of the generator, default is `elle.rw-register`
     ns: CljNs,
     /// The clojure generator Instance.
@@ -22,9 +22,9 @@ pub struct ElleGenerator {
     cache: Vec<Op>,
 }
 
-impl ElleGenerator {
+impl ElleRwGenerator {
     pub fn new() -> j4rs::errors::Result<Self> {
-        let ns = CljCore::default().require("elle.rw-register")?;
+        let ns = CLOJURE.require("elle.rw-register")?;
         Ok(Self {
             ns,
             gen: Mutex::new(None),
@@ -33,7 +33,7 @@ impl ElleGenerator {
     }
 }
 
-impl Generator for ElleGenerator {
+impl Generator for ElleRwGenerator {
     /// It generates a batch of ops in one time, and reserves the gen `Instance`
     /// for next time to use.
     fn get_op(&mut self) -> anyhow::Result<Op> {
@@ -55,13 +55,13 @@ impl Generator for ElleGenerator {
             cljgen
         )?)];
 
-        let first_seq = pre_serialize(CljCore::default().var("first")?.invoke(&two_seqs)?)?;
+        let first_seq = pre_serialize(CLOJURE.var("first")?.invoke(&two_seqs)?)?;
         self.cache = Vec::<Op>::de(&first_seq.ser()?)?
             .into_iter()
             .rev()
             .collect();
 
-        let second_seq = CljCore::default().var("second")?.invoke(&two_seqs)?;
+        let second_seq = CLOJURE.var("second")?.invoke(&two_seqs)?;
         // update the elle gen
         gen.replace(second_seq);
         Ok(self
@@ -81,7 +81,7 @@ mod test {
     #[test]
     fn elle_gen_should_work() -> Result<(), Box<dyn std::error::Error>> {
         let _jvm = JvmBuilder::new().build()?;
-        let mut gen = ElleGenerator::new()?;
+        let mut gen = ElleRwGenerator::new()?;
         for _ in 0..GENERATOR_CACHE_SIZE * 2 + 10 {
             gen.get_op()?;
         }

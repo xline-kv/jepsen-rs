@@ -1,7 +1,7 @@
 use anyhow::Result;
 use j4rs::{errors::Result as jResult, Instance, InvocationArg};
 
-use crate::{cljeval, cljinvoke, nsinvoke, with_jvm, CljCore};
+use crate::{cljeval, cljinvoke, nsinvoke, with_jvm, CLOJURE};
 
 /// print a java instance
 pub fn print(inst: Instance) {
@@ -47,7 +47,7 @@ pub trait JsonSerde {
 
 impl JsonSerde for Instance {
     fn ser(self) -> Result<String> {
-        let json = CljCore::default().require("clojure.data.json")?;
+        let json = CLOJURE.require("clojure.data.json")?;
         let jsonify = nsinvoke!(json, "write-str", self)?;
         Ok(java_to_string(&jsonify)?)
     }
@@ -55,7 +55,7 @@ impl JsonSerde for Instance {
     where
         Self: Sized,
     {
-        let json = CljCore::default().require("clojure.data.json")?;
+        let json = CLOJURE.require("clojure.data.json")?;
         let inst = nsinvoke!(json, "read-string", s)?;
         Ok(inst)
     }
