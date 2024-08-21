@@ -31,8 +31,8 @@ where
     })
 }
 
-pub fn read(arg: &str) -> Instance {
-    cljinvoke_java_api!("read", arg).unwrap()
+pub fn read_edn(arg: &str) -> j4rs::errors::Result<Instance> {
+    cljinvoke!("load-string", arg)
 }
 
 fn invoke_clojure_java_api(
@@ -105,7 +105,7 @@ pub static CLOJURE: CljCore = CljCore { ns: "clojure.core" };
 
 impl CljCore {
     pub fn require(&self, ns: &str) -> j4rs::errors::Result<CljNs> {
-        CljNs::var_inner(self.ns, "require")?.invoke1(read(ns))?;
+        CljNs::var_inner(self.ns, "require")?.invoke1(cljinvoke_java_api!("read", ns)?)?;
         Ok(CljNs { ns: ns.to_string() })
     }
 
@@ -123,26 +123,21 @@ impl Default for CljCore {
 #[cfg(test)]
 mod test {
     use j4rs::JvmBuilder;
-    use utils::pre_serialize;
+    use utils::{pre_serialize, J4rsDie};
 
     use self::utils::print_clj;
     use super::*;
     use crate::utils::print;
 
     #[test]
-    fn test_elle_analysis() -> Result<(), Box<dyn std::error::Error>> {
+    fn test_elle_check() -> Result<(), Box<dyn std::error::Error>> {
         let _jvm = JvmBuilder::new().build()?;
         let r = CLOJURE.require("elle.rw-register")?;
         let h = CLOJURE.require("jepsen.history")?;
-        let history = cljeval!(
-           [{:index 0 :time 0 :type :invoke :process 0 :f :txn :value [[:r 1 nil] [:w 1 2]]}
-            {:index 1 :time 1 :type :invoke :process 1 :f :txn :value [[:r 1 nil] [:w 1 3]]}
-            {:index 2 :time 2 :type :ok :process 0 :f :txn :value [[:r 1 2] [:w 1 2]]}
-            {:index 3 :time 3 :type :ok :process 1 :f :txn :value [[:r 1 2] [:w 1 3]]}]
-        )?;
-        let jh = h.var("history")?.invoke1(history)?;
-        let res = r.var("check")?.invoke1(jh)?;
-        print(res);
+        let history = read_edn(include_str!("../assets/ex_history.edn"))?;
+        let history = nsinvoke!(h, "history", history)?;
+        let res = nsinvoke!(r, "check", history)?;
+        print_clj(res);
         Ok(())
     }
 
@@ -162,7 +157,7 @@ mod test {
         let _jvm = JvmBuilder::new().build()?;
         let r = CLOJURE.require("elle.rw-register")?;
         let h = CLOJURE.require("jepsen.history")?;
-        let gen = r.var("gen")?.invoke0();
+        let gen = r.var("gen")?.invoke0()?;
         let history = cljinvoke!("take", 10, gen)?;
         let res = nsinvoke!(r, "check", nsinvoke!(h, "history", history)?)?;
         print(res);
