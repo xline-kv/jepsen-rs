@@ -6,7 +6,7 @@ use std::{
 
 use madsim::runtime::NodeHandle;
 
-use crate::generator::Generator;
+use crate::generator::RawGenerator;
 
 /// The global context
 #[non_exhaustive]
@@ -14,9 +14,9 @@ pub struct Global {
     /// The thread pool
     pub thread_pool: HashMap<u64, NodeHandle>,
     /// The original generator
-    pub gen: Arc<dyn Generator>,
+    pub gen: Arc<dyn RawGenerator>,
     /// The start time of the simulation
-    pub begin_time: time::Instant,
+    pub start_time: time::Instant,
 }
 
 /// The context of an operation

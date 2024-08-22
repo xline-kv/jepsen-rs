@@ -1,7 +1,6 @@
 //! NOTE: Requires java 21 due to https://github.com/jepsen-io/jepsen/issues/585
 
 mod checker;
-mod context;
 mod generator;
 mod history;
 mod jtests;

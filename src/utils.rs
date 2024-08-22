@@ -1,7 +1,7 @@
 use anyhow::Result;
 use j4rs::{errors::Result as jResult, Instance, InvocationArg};
 
-use crate::{cljeval, cljinvoke, nsinvoke, with_jvm, CLOJURE};
+use crate::{cljeval, cljinvoke, nsinvoke, with_jvm};
 
 /// print a java instance
 pub fn print(inst: Instance) {
@@ -31,34 +31,8 @@ pub fn clj_to_string(inst: Instance) -> jResult<String> {
 }
 
 /// Convert a java instance `j4rs::Instance` to a rust String
-fn java_to_string(inst: &Instance) -> jResult<String> {
+pub fn java_to_string(inst: &Instance) -> jResult<String> {
     with_jvm(|jvm| -> jResult<_> { jvm.to_rust(jvm.cast(inst, "java.lang.String")?) })
-}
-
-/// This trait is for json serialization and deserialization
-///
-/// This trait implements to `j4rs::Instance` and `Op`.
-pub trait JsonSerde {
-    fn ser(self) -> Result<String>;
-    fn de(s: &str) -> Result<Self>
-    where
-        Self: Sized;
-}
-
-impl JsonSerde for Instance {
-    fn ser(self) -> Result<String> {
-        let json = CLOJURE.require("clojure.data.json")?;
-        let jsonify = nsinvoke!(json, "write-str", self)?;
-        Ok(java_to_string(&jsonify)?)
-    }
-    fn de(s: &str) -> Result<Self>
-    where
-        Self: Sized,
-    {
-        let json = CLOJURE.require("clojure.data.json")?;
-        let inst = nsinvoke!(json, "read-string", s)?;
-        Ok(inst)
-    }
 }
 
 /// This trait is for printing error messages better than `unwrap()`

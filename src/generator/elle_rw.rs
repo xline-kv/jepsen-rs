@@ -3,11 +3,11 @@ use std::sync::Mutex;
 use anyhow::{anyhow, Context};
 use j4rs::{Instance, InvocationArg};
 
-use super::{Generator, GENERATOR_CACHE_SIZE};
+use super::{RawGenerator, GENERATOR_CACHE_SIZE};
 use crate::{
     cljeval, cljinvoke, init_jvm, nseval, nsevalstr, nsinvoke,
-    op::Op,
-    utils::{pre_serialize, JsonSerde},
+    op::{Op, Ops},
+    utils::pre_serialize,
     CljNs, CLOJURE,
 };
 
@@ -19,7 +19,7 @@ pub struct ElleRwGenerator {
     /// The cached `Op`s of the generator. Because the clojure generator will
     /// generates infinite sequence, we can take some of them to cache. When the
     /// `Op`s run out, fetch new `Op`s from the clojure generator.
-    cache: Vec<Op>,
+    cache: Ops,
 }
 
 impl ElleRwGenerator {
@@ -28,12 +28,12 @@ impl ElleRwGenerator {
         Ok(Self {
             ns,
             gen: Mutex::new(None),
-            cache: Vec::with_capacity(GENERATOR_CACHE_SIZE),
+            cache: Ops(Vec::with_capacity(GENERATOR_CACHE_SIZE)),
         })
     }
 }
 
-impl Generator for ElleRwGenerator {
+impl RawGenerator for ElleRwGenerator {
     /// It generates a batch of ops in one time, and reserves the gen `Instance`
     /// for next time to use.
     fn get_op(&mut self) -> anyhow::Result<Op> {
@@ -56,10 +56,8 @@ impl Generator for ElleRwGenerator {
         )?)];
 
         let first_seq = pre_serialize(CLOJURE.var("first")?.invoke(&two_seqs)?)?;
-        self.cache = Vec::<Op>::de(&first_seq.ser()?)?
-            .into_iter()
-            .rev()
-            .collect();
+        let ops: Ops = first_seq.try_into()?;
+        self.cache = ops.rev();
 
         let second_seq = CLOJURE.var("second")?.invoke(&two_seqs)?;
         // update the elle gen
@@ -76,7 +74,7 @@ mod test {
     use j4rs::JvmBuilder;
 
     use super::*;
-    use crate::generator::Generator;
+    use crate::generator::RawGenerator;
 
     #[test]
     fn elle_gen_should_work() -> Result<(), Box<dyn std::error::Error>> {

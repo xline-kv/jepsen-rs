@@ -436,6 +436,7 @@ dependencies = [
  "async-trait",
  "j4rs",
  "madsim",
+ "serde",
  "serde_json",
 ]
 
