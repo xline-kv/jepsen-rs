@@ -8,7 +8,7 @@ use crate::{
     cljeval, cljinvoke, init_jvm, nseval, nsevalstr, nsinvoke,
     op::{Op, Ops},
     utils::pre_serialize,
-    CljNs, CLOJURE,
+    with_jvm, CljNs, CLOJURE,
 };
 
 pub struct ElleRwGenerator {
@@ -24,11 +24,13 @@ pub struct ElleRwGenerator {
 
 impl ElleRwGenerator {
     pub fn new() -> j4rs::errors::Result<Self> {
-        let ns = CLOJURE.require("elle.rw-register")?;
-        Ok(Self {
-            ns,
-            gen: Mutex::new(None),
-            cache: Ops(Vec::with_capacity(GENERATOR_CACHE_SIZE)),
+        with_jvm(|_| {
+            let ns = CLOJURE.require("elle.rw-register")?;
+            Ok(Self {
+                ns,
+                gen: Mutex::new(None),
+                cache: Ops(Vec::with_capacity(GENERATOR_CACHE_SIZE)),
+            })
         })
     }
 }
@@ -71,8 +73,6 @@ impl RawGenerator for ElleRwGenerator {
 
 #[cfg(test)]
 mod test {
-    use j4rs::JvmBuilder;
-
     use super::*;
     use crate::generator::RawGenerator;
 

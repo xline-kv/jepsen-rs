@@ -41,7 +41,7 @@ where
 }
 
 pub fn read_edn(arg: &str) -> j4rs::errors::Result<Instance> {
-    cljinvoke!("load-string", arg)
+    with_jvm(|_| cljinvoke!("load-string", arg))
 }
 
 fn invoke_clojure_java_api(

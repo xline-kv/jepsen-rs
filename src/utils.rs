@@ -1,7 +1,7 @@
 use anyhow::Result;
 use j4rs::{errors::Result as jResult, Instance, InvocationArg};
 
-use crate::{cljeval, cljinvoke, nsinvoke, with_jvm};
+use crate::{cljeval, cljinvoke, nsinvoke, with_jvm, CLOJURE};
 
 /// print a java instance
 pub fn print(inst: Instance) {
@@ -27,7 +27,7 @@ pub fn print_clj(inst: Instance) {
 /// assert_eq!(res, "{:a 1, :b \"hello\"}".to_string());
 /// ```
 pub fn clj_to_string(inst: Instance) -> jResult<String> {
-    java_to_string(&cljinvoke!("pr-str", inst)?)
+    with_jvm(|_| java_to_string(&cljinvoke!("pr-str", inst)?))
 }
 
 /// Convert a java instance `j4rs::Instance` to a rust String
@@ -54,6 +54,22 @@ impl<T> J4rsDie<T> for j4rs::errors::Result<T> {
 
 /// This fn is to extract the value of generated ops from elle generator.
 /// This function should be called before serialize the Instance.
-pub fn pre_serialize(i: Instance) -> j4rs::errors::Result<Instance> {
+pub fn pre_serialize(i: Instance) -> jResult<Instance> {
     cljinvoke!("map", cljeval!(#(:value %)), i)
+}
+
+/// Convert a clojure instance to json string
+pub fn clj_jsonify(inst: Instance) -> jResult<String> {
+    with_jvm(|_| {
+        let json = CLOJURE.require("clojure.data.json")?;
+        java_to_string(&nsinvoke!(json, "write-str", inst)?)
+    })
+}
+
+/// Convert a json string to clojure instance
+pub fn clj_from_json(s: &str) -> jResult<Instance> {
+    with_jvm(|_| {
+        let json = CLOJURE.require("clojure.data.json")?;
+        nsinvoke!(json, "read-str", s)
+    })
 }

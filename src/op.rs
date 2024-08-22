@@ -11,12 +11,16 @@ use serde::{
 };
 use serde_json::{json, Value};
 
-use crate::{nsinvoke, utils::java_to_string, with_jvm, CLOJURE};
+use crate::{
+    nsinvoke,
+    utils::{clj_from_json, clj_jsonify, java_to_string},
+    with_jvm, CLOJURE,
+};
 
 /// An operation that can be executed on a database
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Op {
-    Read(u64),
+    Read(u64, Option<u64>),
     Write(u64, u64),
     Txn(Vec<Op>),
 }
@@ -56,12 +60,10 @@ fn parse_op(json: &Value) -> Result<Op> {
             if let Some(op_type) = arr[0].as_str() {
                 // Handle Read or Write
                 let key = arr[1].as_u64().ok_or(anyhow!("Invalid key"))?;
+                let value = arr[2].as_u64();
                 match op_type {
-                    "r" => Ok(Op::Read(key)),
-                    "w" => {
-                        let value = arr[2].as_u64().ok_or(anyhow!("Invalid value"))?;
-                        Ok(Op::Write(key, value))
-                    }
+                    "r" => Ok(Op::Read(key, value)),
+                    "w" => Ok(Op::Write(key, value.ok_or(anyhow!("Invalid value"))?)),
                     _ => Err(anyhow!("Unknown op type")),
                 }
             } else {
@@ -77,7 +79,7 @@ fn parse_op(json: &Value) -> Result<Op> {
 /// Convert an [`Op`] to JSON
 fn op_to_json(op: &Op) -> Value {
     match op {
-        Op::Read(key) => json!(["r", key, Value::Null]),
+        Op::Read(key, value) => json!(["r", key, value]),
         Op::Write(key, value) => json!(["w", key, value]),
         Op::Txn(ops) => {
             let json_ops: Vec<Value> = ops.iter().map(op_to_json).collect();
@@ -129,38 +131,29 @@ impl<'de> Deserialize<'de> for Op {
 impl TryFrom<Instance> for Ops {
     type Error = anyhow::Error;
     fn try_from(value: Instance) -> std::result::Result<Self, Self::Error> {
-        with_jvm(|_| {
-            let json = CLOJURE.require("clojure.data.json")?;
-            let jsonify = nsinvoke!(json, "write-str", value)?;
-            Ok(serde_json::from_str(&java_to_string(&jsonify)?)?)
-        })
+        Ok(serde_json::from_str(&clj_jsonify(value)?)?)
     }
 }
 
 impl TryFrom<Ops> for Instance {
     type Error = anyhow::Error;
     fn try_from(value: Ops) -> std::result::Result<Self, Self::Error> {
-        with_jvm(|_| {
-            let json = CLOJURE.require("clojure.data.json")?;
-            let inst = nsinvoke!(json, "read-str", serde_json::to_string(&value)?)?;
-            Ok(inst)
-        })
+        Ok(clj_from_json(&serde_json::to_string(&value)?)?)
     }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::init_jvm;
 
     #[test]
     fn test_op_serde() {
         let res = [
             (r#"["w",6,1]"#, Op::Write(6, 1)),
-            (r#"["r",8,null]"#, Op::Read(8)),
+            (r#"["r",8,null]"#, Op::Read(8, None)),
             (
                 r#"[["w",6,1],["r",8,null]]"#,
-                Op::Txn(vec![Op::Write(6, 1), Op::Read(8)]),
+                Op::Txn(vec![Op::Write(6, 1), Op::Read(8, None)]),
             ),
         ];
         for (json_str, op) in res {
@@ -177,10 +170,10 @@ mod test {
 
         let ops = Ops(vec![
             Op::Txn(vec![Op::Write(6, 1), Op::Write(8, 1)]),
-            Op::Txn(vec![Op::Write(9, 1), Op::Read(8)]),
-            Op::Txn(vec![Op::Write(6, 2), Op::Read(6)]),
+            Op::Txn(vec![Op::Write(9, 1), Op::Read(8, None)]),
+            Op::Txn(vec![Op::Write(6, 2), Op::Read(6, None)]),
             Op::Txn(vec![Op::Write(9, 2)]),
-            Op::Txn(vec![Op::Read(8), Op::Write(9, 3)]),
+            Op::Txn(vec![Op::Read(8, None), Op::Write(9, 3)]),
         ]);
 
         assert_eq!(serde_json::to_string(&ops).unwrap().trim(), json_str.trim());
@@ -191,7 +184,7 @@ mod test {
     fn test_convertion_between_ops_and_instance() {
         let ops = Ops(vec![
             Op::Txn(vec![Op::Write(6, 1), Op::Write(8, 1)]),
-            Op::Txn(vec![Op::Write(9, 1), Op::Read(8)]),
+            Op::Txn(vec![Op::Write(9, 1), Op::Read(8, None)]),
         ]);
 
         let inst: Instance = ops.clone().try_into().unwrap();
