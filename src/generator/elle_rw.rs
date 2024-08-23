@@ -71,6 +71,14 @@ impl RawGenerator for ElleRwGenerator {
     }
 }
 
+impl Iterator for ElleRwGenerator {
+    type Item = anyhow::Result<Op>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        Some(self.get_op())
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

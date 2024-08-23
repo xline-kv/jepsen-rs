@@ -1,8 +1,8 @@
-mod context;
+pub mod context;
 mod elle_rw;
 use std::{collections::HashMap, sync::Arc};
 
-use context::Global;
+pub use context::Global;
 use madsim::runtime::NodeHandle;
 
 use crate::op::Op;
@@ -11,14 +11,15 @@ use crate::op::Op;
 pub type GeneratorId = u64;
 
 /// Cache size for the generator.
-pub const GENERATOR_CACHE_SIZE: usize = 100;
+pub const GENERATOR_CACHE_SIZE: usize = 200;
 
-/// This trait is for the raw generator (clojure generator), it will only
+/// This trait is for the raw generator (clojure generator), which will only
 /// generate ops infinitely.
 pub trait RawGenerator {
     fn get_op(&mut self) -> anyhow::Result<Op>;
 }
 
+/// The generator. It's a wrapper for the clojure seq and global context.
 pub struct Generator<T: Iterator<Item = U>, U = anyhow::Result<Op>> {
     /// generator id
     pub id: GeneratorId,

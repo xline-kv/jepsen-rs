@@ -6,7 +6,7 @@ use std::{
 use madsim::{runtime::NodeHandle, time};
 
 use super::GeneratorId;
-use crate::generator::RawGenerator;
+use crate::{generator::RawGenerator, history::SerializableHistoryList};
 
 /// The global context
 #[non_exhaustive]
@@ -17,6 +17,8 @@ pub struct Global {
     pub gen: Arc<dyn RawGenerator>,
     /// The start time of the simulation
     pub start_time: time::Instant,
+    /// The history list
+    pub history: Mutex<SerializableHistoryList>,
 }
 
 impl Global {
@@ -26,9 +28,10 @@ impl Global {
             thread_pool: Mutex::new(BTreeMap::new()),
             gen,
             start_time: time::Instant::now(),
+            history: Mutex::new(SerializableHistoryList::default()),
         }
     }
-    /// Find the minimal usable id in thread pool
+    /// Find the minimal usable id in the thread pool
     pub fn get_next_id(&self) -> GeneratorId {
         let pool = self.thread_pool.lock().expect("Failed to lock thread pool");
         for (index, id) in pool.keys().enumerate() {

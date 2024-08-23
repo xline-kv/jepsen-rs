@@ -93,6 +93,7 @@ macro_rules! nseval {
 #[macro_export]
 macro_rules! nsevalstr {
     ($ns:expr, $str:expr) => {
+        todo!("There still exists a bug in this macro, so it is **not recommended** to use it.")
         || -> j4rs::errors::Result<j4rs::Instance> {
             let s = $str;
             let first_space_pos = s.find(' ').unwrap_or(s.len());
@@ -102,22 +103,4 @@ macro_rules! nsevalstr {
             let load_str_ifn = $crate::Clojure::default().var("load-string")?;
         }()
     };
-}
-
-#[cfg(test)]
-mod tests {
-    use j4rs::JvmBuilder;
-
-    use super::*;
-    use crate::{init_jvm, utils::print_clj, CLOJURE};
-
-    #[test]
-    fn mytest() -> Result<(), Box<dyn std::error::Error>> {
-        init_jvm();
-        let ns = CLOJURE.require("elle.rw-register")?;
-        let gen = ns.var("gen")?;
-        let res = cljinvoke!("take", 100, gen.invoke0()?)?;
-        print_clj(res);
-        Ok(())
-    }
 }

@@ -25,6 +25,27 @@ pub enum Op {
     Txn(Vec<Op>),
 }
 
+/// Op type of functions that being applied to db
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OpFunctionType {
+    #[serde(rename = "r")]
+    Read,
+    #[serde(rename = "w")]
+    Write,
+    Txn,
+}
+
+impl From<&Op> for OpFunctionType {
+    fn from(op: &Op) -> Self {
+        match op {
+            Op::Read(_, _) => OpFunctionType::Read,
+            Op::Write(_, _) => OpFunctionType::Write,
+            Op::Txn(_) => OpFunctionType::Txn,
+        }
+    }
+}
+
 /// A list of [`Op`]s
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Ops(pub Vec<Op>);
