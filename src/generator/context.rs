@@ -1,32 +1,30 @@
-use std::{
-    collections::BTreeMap,
-    sync::{Arc, Mutex},
-};
+use std::{collections::BTreeMap, sync::Mutex};
 
+use anyhow::Result;
 use madsim::{runtime::NodeHandle, time};
 
 use super::GeneratorId;
-use crate::{generator::RawGenerator, history::SerializableHistoryList};
+use crate::{history::SerializableHistoryList, op::Op, utils::IteratorExt};
 
 /// The global context
 #[non_exhaustive]
-pub struct Global {
+pub struct Global<'a, T = Result<Op>> {
     /// The thread pool
     pub thread_pool: Mutex<BTreeMap<GeneratorId, NodeHandle>>,
     /// The original raw generator
-    pub gen: Arc<dyn RawGenerator>,
+    pub gen: Mutex<Option<Box<dyn Iterator<Item = T> + 'a>>>,
     /// The start time of the simulation
     pub start_time: time::Instant,
     /// The history list
     pub history: Mutex<SerializableHistoryList>,
 }
 
-impl Global {
+impl<'a, T: 'a> Global<'a, T> {
     /// Create a new global context
-    pub fn new(gen: Arc<dyn RawGenerator>) -> Self {
+    pub fn new(gen: impl Iterator<Item = T> + 'a) -> Self {
         Self {
             thread_pool: Mutex::new(BTreeMap::new()),
-            gen,
+            gen: Mutex::new(Some(Box::new(gen) as Box<dyn Iterator<Item = T> + 'a>)),
             start_time: time::Instant::now(),
             history: Mutex::new(SerializableHistoryList::default()),
         }
@@ -57,6 +55,15 @@ impl Global {
             .expect("Failed to lock thread pool")
             .remove(&id);
     }
+
+    /// Take the next `n` ops from the raw generator.
+    pub fn take_seq(&self, n: usize) -> Box<dyn Iterator<Item = T> + 'a> {
+        if let Some(gen) = self.gen.lock().expect("Failed to lock gen").as_mut() {
+            Box::new(gen.split_at(n)) as Box<dyn Iterator<Item = T> + 'a>
+        } else {
+            Box::new(std::iter::empty()) as Box<dyn Iterator<Item = T>>
+        }
+    }
 }
 
 #[cfg(test)]
@@ -68,7 +75,7 @@ mod tests {
     #[test]
     fn test_alloc_and_free_generator() {
         let rt = madsim::runtime::Runtime::new();
-        let gen = Global::new(Arc::new(ElleRwGenerator::new().unwrap()));
+        let gen = Global::new(Box::new(ElleRwGenerator::new().unwrap()));
         assert_eq!(gen.alloc_new_generator(rt.create_node().build()), 0);
         assert_eq!(gen.alloc_new_generator(rt.create_node().build()), 1);
         assert_eq!(gen.alloc_new_generator(rt.create_node().build()), 2);
