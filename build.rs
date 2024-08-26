@@ -1,6 +1,9 @@
 use j4rs::{JvmBuilder, MavenArtifact, MavenArtifactRepo, MavenSettings};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Only rerun when build.rs changes, saves a lot of time
+    println!("cargo:rerun-if-changed=build.rs");
+
     let jvm = JvmBuilder::new()
         .with_maven_settings(MavenSettings::new(vec![
             MavenArtifactRepo::from("maven_central:https://repo1.maven.org/maven2"),
