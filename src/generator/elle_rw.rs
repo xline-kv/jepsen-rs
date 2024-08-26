@@ -4,7 +4,7 @@ use j4rs::{Instance, InvocationArg};
 
 use super::{RawGenerator, GENERATOR_CACHE_SIZE};
 use crate::{
-    cljinvoke, nsinvoke,
+    cljinvoke, init_jvm, nsinvoke,
     op::{Op, Ops},
     utils::{pre_serialize, ToDe},
     with_jvm, CljNs, CLOJURE,
@@ -35,9 +35,11 @@ impl ElleRwGenerator {
 }
 
 impl RawGenerator for ElleRwGenerator {
+    type Item = anyhow::Result<Op>;
     /// It generates a batch of ops in one time, and reserves the gen `Instance`
     /// for next time to use.
     fn get_op(&mut self) -> anyhow::Result<Op> {
+        init_jvm();
         if let Some(op) = self.cache.pop() {
             return Ok(op);
         }
@@ -85,7 +87,6 @@ mod test {
 
     #[test]
     fn elle_gen_should_work() -> Result<(), Box<dyn std::error::Error>> {
-        init_jvm();
         let mut gen = ElleRwGenerator::new()?;
         for _ in 0..GENERATOR_CACHE_SIZE * 2 + 10 {
             gen.get_op()?;

@@ -12,7 +12,7 @@ pub struct Global<'a, T = Result<Op>> {
     /// The thread pool
     pub thread_pool: Mutex<BTreeMap<GeneratorId, NodeHandle>>,
     /// The original raw generator
-    pub gen: Mutex<Option<Box<dyn Iterator<Item = T> + 'a>>>,
+    pub gen: Mutex<Option<Box<dyn Iterator<Item = T> + Send + 'a>>>,
     /// The start time of the simulation
     pub start_time: time::Instant,
     /// The history list
@@ -21,10 +21,12 @@ pub struct Global<'a, T = Result<Op>> {
 
 impl<'a, T: 'a> Global<'a, T> {
     /// Create a new global context
-    pub fn new(gen: impl Iterator<Item = T> + 'a) -> Self {
+    pub fn new(gen: impl Iterator<Item = T> + Send + 'a) -> Self {
         Self {
             thread_pool: Mutex::new(BTreeMap::new()),
-            gen: Mutex::new(Some(Box::new(gen) as Box<dyn Iterator<Item = T> + 'a>)),
+            gen: Mutex::new(Some(
+                Box::new(gen) as Box<dyn Iterator<Item = T> + Send + 'a>
+            )),
             start_time: time::Instant::now(),
             history: Mutex::new(SerializableHistoryList::default()),
         }
