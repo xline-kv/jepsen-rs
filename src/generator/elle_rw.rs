@@ -1,13 +1,12 @@
 use std::sync::Mutex;
 
-use anyhow::{anyhow, Context};
 use j4rs::{Instance, InvocationArg};
 
 use super::{RawGenerator, GENERATOR_CACHE_SIZE};
 use crate::{
-    cljeval, cljinvoke, init_jvm, nseval, nsevalstr, nsinvoke,
+    cljinvoke, nsinvoke,
     op::{Op, Ops},
-    utils::pre_serialize,
+    utils::{pre_serialize, ToDe},
     with_jvm, CljNs, CLOJURE,
 };
 
@@ -58,7 +57,7 @@ impl RawGenerator for ElleRwGenerator {
         )?)];
 
         let first_seq = pre_serialize(CLOJURE.var("first")?.invoke(&two_seqs)?)?;
-        let ops: Ops = first_seq.try_into()?;
+        let ops: Ops = first_seq.to_de()?;
         self.cache = ops.rev();
 
         let second_seq = CLOJURE.var("second")?.invoke(&two_seqs)?;
@@ -82,7 +81,7 @@ impl Iterator for ElleRwGenerator {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::generator::RawGenerator;
+    use crate::{generator::RawGenerator, init_jvm};
 
     #[test]
     fn elle_gen_should_work() -> Result<(), Box<dyn std::error::Error>> {

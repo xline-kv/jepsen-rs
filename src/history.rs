@@ -3,14 +3,12 @@ use std::{
     sync::Arc,
 };
 
-use j4rs::Instance;
 use madsim::time;
 use serde::{Deserialize, Serialize};
 
 use crate::{
     generator::Global,
     op::{Op, OpFunctionType},
-    utils::{clj_from_json, clj_jsonify},
 };
 
 type ErrorType = Vec<String>;
@@ -65,21 +63,6 @@ impl DerefMut for SerializableHistoryList {
     }
 }
 
-// Convertion
-
-impl TryFrom<Instance> for SerializableHistoryList {
-    type Error = anyhow::Error;
-    fn try_from(value: Instance) -> std::result::Result<Self, Self::Error> {
-        Ok(serde_json::from_str(&clj_jsonify(value)?)?)
-    }
-}
-impl TryFrom<SerializableHistoryList> for Instance {
-    type Error = anyhow::Error;
-    fn try_from(value: SerializableHistoryList) -> std::result::Result<Self, Self::Error> {
-        Ok(clj_from_json(&serde_json::to_string(&value)?)?)
-    }
-}
-
 impl<ERR> SerializableHistoryList<OpFunctionType, ERR> {
     /// Get the current timestamp.
     fn timestamp(&self, global: &Arc<Global>) -> u64 {
@@ -131,15 +114,20 @@ impl<ERR> SerializableHistoryList<OpFunctionType, ERR> {
 
 #[cfg(test)]
 mod tests {
+    use j4rs::Instance;
+
     use super::*;
-    use crate::{read_edn, utils::print_clj};
+    use crate::{
+        read_edn,
+        utils::{print_clj, FromSerde, ToDe},
+    };
 
     #[test]
     fn test_history_list_conversion() -> anyhow::Result<()> {
         let his_edn = read_edn(include_str!("../assets/ex_history.edn"))?;
-        let res: SerializableHistoryList = his_edn.try_into()?;
+        let res: SerializableHistoryList = his_edn.to_de()?;
         assert_eq!(res.len(), 4);
-        let res: Instance = res.try_into()?;
+        let res: Instance = Instance::from_ser(res)?;
         print_clj(res);
         Ok(())
     }

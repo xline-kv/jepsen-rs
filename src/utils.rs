@@ -1,5 +1,6 @@
 use anyhow::Result;
 use j4rs::{errors::Result as jResult, Instance, InvocationArg};
+use serde::Serialize;
 
 use crate::{cljeval, cljinvoke, nsinvoke, with_jvm, CLOJURE};
 
@@ -72,4 +73,66 @@ pub fn clj_from_json(s: &str) -> jResult<Instance> {
         let json = CLOJURE.require("clojure.data.json")?;
         nsinvoke!(json, "read-str", s)
     })
+}
+
+/// Convert any rust struct which impl Serialize to clojure instance
+pub trait FromSerde {
+    fn from_ser<T: Serialize>(s: T) -> Result<Self>
+    where
+        Self: Sized;
+}
+
+impl FromSerde for Instance {
+    fn from_ser<T: Serialize>(s: T) -> Result<Self>
+    where
+        Self: Sized,
+    {
+        Ok(clj_from_json(&serde_json::to_string(&s)?)?)
+    }
+}
+
+/// Convert clojure instance to any rust struct which impl Serialize
+pub trait ToDe {
+    fn to_de<T: for<'de> serde::Deserialize<'de>>(self) -> Result<T>;
+}
+
+impl ToDe for Instance {
+    fn to_de<T: for<'de> serde::Deserialize<'de>>(self) -> Result<T> {
+        Ok(serde_json::from_str(&clj_jsonify(self)?)?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde::Deserialize;
+
+    use super::*;
+    use crate::init_jvm;
+
+    #[test]
+    fn test_convertion_between_clojure_and_rust() {
+        #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+        struct TestSer {
+            a: i32,
+            b: String,
+        }
+        init_jvm();
+
+        let s = cljeval!((assoc {:a 1} :b "hello")).unwrap();
+        let res: TestSer = s.to_de().unwrap();
+        assert_eq!(
+            res,
+            TestSer {
+                a: 1,
+                b: "hello".to_string()
+            }
+        );
+
+        let s = TestSer {
+            a: 1,
+            b: "hello".to_string(),
+        };
+        let res: Instance = Instance::from_ser(&s).unwrap();
+        print_clj(res);
+    }
 }

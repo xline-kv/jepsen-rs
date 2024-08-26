@@ -1,6 +1,9 @@
 /target
 /dom_top
+/out
+/classes
 
+/.cpcache
 .clj-kondo
 .lsp
 

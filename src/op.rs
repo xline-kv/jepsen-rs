@@ -4,18 +4,11 @@ use std::{
 };
 
 use anyhow::{anyhow, Result};
-use j4rs::Instance;
 use serde::{
     de::{SeqAccess, Visitor},
     Deserialize, Serialize,
 };
 use serde_json::{json, Value};
-
-use crate::{
-    nsinvoke,
-    utils::{clj_from_json, clj_jsonify, java_to_string},
-    with_jvm, CLOJURE,
-};
 
 /// An operation that can be executed on a database
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -147,25 +140,12 @@ impl<'de> Deserialize<'de> for Op {
     }
 }
 
-// Convertion
-
-impl TryFrom<Instance> for Ops {
-    type Error = anyhow::Error;
-    fn try_from(value: Instance) -> std::result::Result<Self, Self::Error> {
-        Ok(serde_json::from_str(&clj_jsonify(value)?)?)
-    }
-}
-
-impl TryFrom<Ops> for Instance {
-    type Error = anyhow::Error;
-    fn try_from(value: Ops) -> std::result::Result<Self, Self::Error> {
-        Ok(clj_from_json(&serde_json::to_string(&value)?)?)
-    }
-}
-
 #[cfg(test)]
 mod test {
+    use j4rs::Instance;
+
     use super::*;
+    use crate::utils::{FromSerde, ToDe};
 
     #[test]
     fn test_op_serde() {
@@ -208,8 +188,8 @@ mod test {
             Op::Txn(vec![Op::Write(9, 1), Op::Read(8, None)]),
         ]);
 
-        let inst: Instance = ops.clone().try_into().unwrap();
-        let res: Ops = inst.try_into().unwrap();
+        let inst: Instance = Instance::from_ser(ops.clone()).unwrap();
+        let res: Ops = inst.to_de().unwrap();
         assert_eq!(ops, res);
     }
 }
