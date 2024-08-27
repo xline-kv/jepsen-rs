@@ -1,4 +1,5 @@
 pub mod iter;
+use anyhow::Result;
 pub use iter::*;
 use j4rs::{errors::Result as jResult, Instance, InvocationArg};
 use serde::Serialize;
