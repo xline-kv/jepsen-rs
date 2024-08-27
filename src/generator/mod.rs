@@ -6,6 +6,7 @@ use std::ops::{AddAssign, RangeFrom};
 use std::{pin::Pin, sync::Arc};
 
 use anyhow::Result;
+use context::GeneratorId;
 pub use context::Global;
 use controller::{DelayStrategy, GeneratorGroupStrategy};
 use tokio_stream::{Stream, StreamExt};
@@ -14,9 +15,6 @@ use crate::{
     op::Op,
     utils::{AsyncIter, ExtraStreamExt},
 };
-
-/// The id of the generator. Each [`GeneratorId`] corresponds to one thread.
-pub type GeneratorId = u64;
 
 /// Cache size for the generator.
 pub const GENERATOR_CACHE_SIZE: usize = 200;
@@ -66,7 +64,7 @@ pub struct Generator<'a, U: Send = Result<Op>> {
 
 impl<'a, U: Send + 'a> Generator<'a, U> {
     pub fn new(global: Arc<Global<'a, U>>, seq: impl Stream<Item = U> + Send + 'a) -> Self {
-        let id = global.get_next_id();
+        let id = global.get_id();
         Self {
             id,
             global,
@@ -121,7 +119,7 @@ impl<'a, U: Send + 'a> Generator<'a, U> {
         let first = self.seq.as_mut().split_at(n).await;
         (
             Generator::new_with_id(self.id, Arc::clone(&self.global), tokio_stream::iter(first)),
-            Generator::new_with_pined_seq(self.id, self.global, self.seq),
+            Generator::new_with_pined_seq(self.global.get_id(), self.global, self.seq),
         )
     }
 
@@ -163,9 +161,8 @@ impl<'a, U: Send + 'a> GeneratorGroup<'a, U> {
         self.gens.push(gen);
     }
 
-    pub fn remove_generator(&mut self, index: usize) {
-        let g = self.gens.remove(index);
-        g.global.free_id(g.id);
+    pub fn remove_generator(&mut self, index: usize) -> Generator<'a, U> {
+        self.gens.remove(index)
     }
 }
 
