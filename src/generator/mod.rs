@@ -154,8 +154,9 @@ impl<'a, T: Stream<Item = U> + Send + Unpin, U: Send + 'a> GeneratorGroup<'a, T,
         self.gens.push(gen);
     }
 
-    pub fn remove_generator(&mut self, index: usize) -> Generator<'a, T, U> {
-        self.gens.remove(index)
+    pub fn remove_generator(&mut self, index: usize) {
+        let g = self.gens.remove(index);
+        g.global.free_id(g.id);
     }
 }
 
@@ -190,7 +191,7 @@ impl<'a, T: Stream<Item = U> + Send + Unpin, U: Send + 'a> AsyncIter for Generat
             {
                 Some(op) => return Some(op),
                 None => {
-                    self.gens.remove(selected);
+                    self.remove_generator(selected);
                 }
             }
         }
