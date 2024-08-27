@@ -1,6 +1,7 @@
 use std::pin::Pin;
 
 use tokio_stream::{Stream, StreamExt};
+
 /// The extra methods on iterators.
 pub trait ExtraStreamExt: Stream {
     /// Splits the iterator at `n`, returns the splited iterators.
@@ -27,6 +28,25 @@ pub trait ExtraStreamExt: Stream {
 }
 
 impl<S: Stream> ExtraStreamExt for S {}
+
+/// A trait of `async fn next()`, implements to Generator(Group).
+pub trait AsyncIter {
+    type Item;
+    fn next(&mut self) -> impl std::future::Future<Output = Option<Self::Item>> + Send;
+    fn collect(mut self) -> impl std::future::Future<Output = Vec<Self::Item>> + Send
+    where
+        Self: Send + Sized,
+        Self::Item: Send,
+    {
+        async move {
+            let mut items = Vec::new();
+            while let Some(item) = self.next().await {
+                items.push(item);
+            }
+            items
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
