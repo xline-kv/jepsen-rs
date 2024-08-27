@@ -1,5 +1,5 @@
 pub mod elle_rw;
-use std::path::PathBuf;
+use std::{default, path::PathBuf};
 
 use anyhow::Result;
 use derive_builder::Builder;
@@ -84,31 +84,29 @@ impl Serialize for ValidType {
     }
 }
 
+/// canonical-model-names in src/elle/consistency_model.clj
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum ConsistencyModel {
-    CausalCerone,
-    CursorStability,
-    MonotonicView,
-    MonotonicSnapshotRead,
     ConsistentView,
+    ConflictSerializable,
+    CursorStability,
     ForwardConsistentView,
-    ParallelSnapshotIsolation,
-    PL3,
-    PL2,
-    PL1,
-    Prefix,
+    MonotonicSnapshotRead,
+    MonotonicView,
+    ReadCommitted,
+    ReadUncommitted,
+    RepeatableRead,
     #[default]
     Serializable,
     SnapshotIsolation,
-    ReadAtomic,
-    RepeatableRead,
-    UpdateAtomic,
     StrictSerializable,
-    StrongSessionPL1,
-    StrongSessionPL2,
-    StrongPL1,
-    StrongPL2,
+    StrongSerializable,
+    UpdateSerializable,
+    StrongSessionReadUncommitted,
+    StrongSessionReadCommitted,
+    StrongReadUncommitted,
+    StrongReadCommitted,
 }
 
 /// Checker trait
@@ -124,6 +122,7 @@ pub trait Check {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{init_jvm, nsinvoke, utils::print_clj, CLOJURE};
 
     #[test]
     fn test_deser_from_json_result() -> anyhow::Result<()> {
