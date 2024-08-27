@@ -53,19 +53,19 @@ impl RawGenerator for RangeFrom<i32> {
 }
 
 /// The generator. It's a wrapper for the clojure seq and global context.
-pub struct Generator<'a, T: Stream<Item = U>, U: Send = Result<Op>> {
+pub struct Generator<'a, U: Send = Result<Op>> {
     /// generator id
     pub id: GeneratorId,
     /// A reference to the global context
     pub global: Arc<Global<'a, U>>,
     /// The sequence (stream) of generator. Note that the seq is finite.
-    pub seq: Pin<Box<T>>,
+    pub seq: Pin<Box<dyn Stream<Item = U> + Send + 'a>>,
     /// The delay strategy between every `next()` function
     pub delay_strategy: DelayStrategy,
 }
 
-impl<'a, T: Stream<Item = U> + Send + Unpin, U: Send + 'a> Generator<'a, T, U> {
-    pub fn new(global: Arc<Global<'a, U>>, seq: T) -> Self {
+impl<'a, U: Send + 'a> Generator<'a, U> {
+    pub fn new(global: Arc<Global<'a, U>>, seq: impl Stream<Item = U> + Send + 'a) -> Self {
         let id = global.get_next_id();
         Self {
             id,
@@ -75,7 +75,11 @@ impl<'a, T: Stream<Item = U> + Send + Unpin, U: Send + 'a> Generator<'a, T, U> {
         }
     }
 
-    pub fn new_with_id(id: GeneratorId, global: Arc<Global<'a, U>>, seq: T) -> Self {
+    pub fn new_with_id(
+        id: GeneratorId,
+        global: Arc<Global<'a, U>>,
+        seq: impl Stream<Item = U> + Send + 'a,
+    ) -> Self {
         Self {
             id,
             global,
@@ -87,7 +91,7 @@ impl<'a, T: Stream<Item = U> + Send + Unpin, U: Send + 'a> Generator<'a, T, U> {
     pub fn new_with_pined_seq(
         id: GeneratorId,
         global: Arc<Global<'a, U>>,
-        seq: Pin<Box<T>>,
+        seq: Pin<Box<dyn Stream<Item = U> + Send + 'a>>,
     ) -> Self {
         Self {
             id,
@@ -101,28 +105,33 @@ impl<'a, T: Stream<Item = U> + Send + Unpin, U: Send + 'a> Generator<'a, T, U> {
         self.delay_strategy = delay;
     }
 
-    pub fn map(self, f: impl Fn(U) -> U + Send) -> Generator<'a, impl Stream<Item = U>, U> {
+    pub fn map(self, f: impl Fn(U) -> U + Send + 'a) -> Self {
         Generator::new_with_id(self.id, self.global, self.seq.map(f))
     }
 
-    pub fn filter(self, f: impl Fn(&U) -> bool + Send) -> Generator<'a, impl Stream<Item = U>, U> {
+    pub fn filter(self, f: impl Fn(&U) -> bool + Send + 'a) -> Self {
         Generator::new_with_id(self.id, self.global, self.seq.filter(f))
     }
 
-    pub fn take(self, n: usize) -> Generator<'a, impl Stream<Item = U>, U> {
+    pub fn take(self, n: usize) -> Self {
         Generator::new_with_id(self.id, self.global, self.seq.take(n))
     }
 
-    pub async fn split_at(mut self, n: usize) -> (Generator<'a, impl Stream<Item = U>, U>, Self) {
+    pub async fn split_at(mut self, n: usize) -> (Self, Self) {
         let first = self.seq.as_mut().split_at(n).await;
         (
             Generator::new_with_id(self.id, Arc::clone(&self.global), tokio_stream::iter(first)),
             Generator::new_with_pined_seq(self.id, self.global, self.seq),
         )
     }
+
+    pub fn chain(self, other: Self) -> Self {
+        let out = self.seq.chain(other.seq);
+        Generator::new_with_id(self.id, self.global, out)
+    }
 }
 
-impl<'a, T: Stream<Item = U> + Send + Unpin, U: Send + 'a> AsyncIter for Generator<'a, T, U> {
+impl<'a, U: Send + 'a> AsyncIter for Generator<'a, U> {
     type Item = U;
     async fn next(&mut self) -> Option<Self::Item> {
         self.delay_strategy.delay().await;
@@ -132,13 +141,13 @@ impl<'a, T: Stream<Item = U> + Send + Unpin, U: Send + 'a> AsyncIter for Generat
 
 /// A group of generators.
 #[derive(Default)]
-pub struct GeneratorGroup<'a, T: Stream<Item = U> + Send, U: Send = Result<Op>> {
-    gens: Vec<Generator<'a, T, U>>,
+pub struct GeneratorGroup<'a, U: Send = Result<Op>> {
+    gens: Vec<Generator<'a, U>>,
     strategy: GeneratorGroupStrategy,
 }
 
-impl<'a, T: Stream<Item = U> + Send + Unpin, U: Send + 'a> GeneratorGroup<'a, T, U> {
-    pub fn new(gens: impl Into<Vec<Generator<'a, T, U>>>) -> Self {
+impl<'a, U: Send + 'a> GeneratorGroup<'a, U> {
+    pub fn new(gens: impl Into<Vec<Generator<'a, U>>>) -> Self {
         Self {
             gens: gens.into(),
             strategy: GeneratorGroupStrategy::default(),
@@ -150,7 +159,7 @@ impl<'a, T: Stream<Item = U> + Send + Unpin, U: Send + 'a> GeneratorGroup<'a, T,
         self
     }
 
-    pub fn push_generator(&mut self, gen: Generator<'a, T, U>) {
+    pub fn push_generator(&mut self, gen: Generator<'a, U>) {
         self.gens.push(gen);
     }
 
@@ -160,10 +169,8 @@ impl<'a, T: Stream<Item = U> + Send + Unpin, U: Send + 'a> GeneratorGroup<'a, T,
     }
 }
 
-impl<'a, T: Stream<Item = U> + Send + Unpin, U: Send + 'a> From<Generator<'a, T, U>>
-    for GeneratorGroup<'a, T, U>
-{
-    fn from(value: Generator<'a, T, U>) -> Self {
+impl<'a, U: Send + 'a> From<Generator<'a, U>> for GeneratorGroup<'a, U> {
+    fn from(value: Generator<'a, U>) -> Self {
         Self {
             gens: Vec::from([value]),
             strategy: GeneratorGroupStrategy::default(),
@@ -171,7 +178,7 @@ impl<'a, T: Stream<Item = U> + Send + Unpin, U: Send + 'a> From<Generator<'a, T,
     }
 }
 
-impl<'a, T: Stream<Item = U> + Send + Unpin, U: Send + 'a> AsyncIter for GeneratorGroup<'a, T, U> {
+impl<'a, U: Send + 'a> AsyncIter for GeneratorGroup<'a, U> {
     type Item = U;
     /// Select one generator to generate `Op` by group strategy. If it's empty,
     /// drop it and try to use another. If all [`Generator`]s in the group
@@ -195,6 +202,22 @@ impl<'a, T: Stream<Item = U> + Send + Unpin, U: Send + 'a> AsyncIter for Generat
                 }
             }
         }
+    }
+}
+
+/// Convert a [`GeneratorGroup`] to a [`Generator`].
+impl<'a, U: Send + 'a> From<GeneratorGroup<'a, U>> for Generator<'a, U> {
+    fn from(mut value: GeneratorGroup<'a, U>) -> Self {
+        assert!(!value.gens.is_empty(), "group should not be empty");
+        let mut strategy = value.strategy;
+        let selected = strategy.choose(0..value.gens.len());
+        let mut origin = value.gens.remove(selected);
+        while !value.gens.is_empty() {
+            let selected = strategy.choose(0..value.gens.len());
+            let pop = value.gens.remove(selected);
+            origin = origin.chain(pop);
+        }
+        origin
     }
 }
 
@@ -256,5 +279,16 @@ mod tests {
             GeneratorGroup::new(vec![gen1, gen2]).with_strategy(GeneratorGroupStrategy::Random);
         let res = gen_group.collect().await;
         assert!(res.into_iter().all(|x| (21..=30).contains(&x)));
+    }
+
+    #[madsim::test]
+    async fn test_generator_group_into_generator() {
+        let global = Arc::new(Global::new(1..));
+        let gen1 = Generator::new(global.clone(), tokio_stream::iter(global.take_seq(5)));
+        let gen2 = Generator::new(global.clone(), tokio_stream::iter(global.take_seq(5)));
+        let gen_group = GeneratorGroup::new(vec![gen1, gen2]);
+        let gen: Generator<_> = gen_group.into();
+        let res = gen.collect().await;
+        assert_eq!(res, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     }
 }

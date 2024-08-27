@@ -10,7 +10,7 @@ pub trait ExtraStreamExt: Stream {
         n: usize,
     ) -> impl std::future::Future<Output = Vec<Self::Item>> + Send
     where
-        Self: Sized + Send,
+        Self: Send,
         Self::Item: Send,
     {
         async move {
@@ -27,7 +27,7 @@ pub trait ExtraStreamExt: Stream {
     }
 }
 
-impl<S: Stream> ExtraStreamExt for S {}
+impl<S: ?Sized + Stream> ExtraStreamExt for S {}
 
 /// A trait of `async fn next()`, implements to Generator(Group).
 pub trait AsyncIter {
