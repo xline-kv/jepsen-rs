@@ -12,6 +12,7 @@ use controller::{DelayStrategy, GeneratorGroupStrategy};
 use tokio_stream::{Stream, StreamExt};
 
 use crate::{
+    client::{Client, TestClient},
     op::Op,
     utils::{AsyncIter, ExtraStreamExt},
 };
@@ -51,20 +52,23 @@ impl RawGenerator for RangeFrom<i32> {
 }
 
 /// The generator. It's a wrapper for the clojure seq and global context.
-pub struct Generator<'a, U: Send = Result<Op>> {
+pub struct Generator<'a, C: Client = TestClient, U: Send = Result<Op>> {
     /// generator id
-    pub id: GeneratorId,
+    pub id: GeneratorId<C>,
     /// A reference to the global context
-    pub global: Arc<Global<'a, U>>,
+    pub global: Arc<Global<'a, C, U>>,
     /// The sequence (stream) of generator. Note that the seq is finite.
     pub seq: Pin<Box<dyn Stream<Item = U> + Send + 'a>>,
     /// The delay strategy between every `next()` function
     pub delay_strategy: DelayStrategy,
 }
 
-impl<'a, U: Send + 'a> Generator<'a, U> {
-    pub fn new(global: Arc<Global<'a, U>>, seq: impl Stream<Item = U> + Send + 'a) -> Self {
-        let id = global.get_id();
+impl<'a, C: Client, U: Send + 'a> Generator<'a, C, U> {
+    pub async fn new(
+        global: Arc<Global<'a, C, U>>,
+        seq: impl Stream<Item = U> + Send + 'a,
+    ) -> Self {
+        let id = global.get_id().await;
         Self {
             id,
             global,
@@ -74,8 +78,8 @@ impl<'a, U: Send + 'a> Generator<'a, U> {
     }
 
     pub fn new_with_id(
-        id: GeneratorId,
-        global: Arc<Global<'a, U>>,
+        id: GeneratorId<C>,
+        global: Arc<Global<'a, C, U>>,
         seq: impl Stream<Item = U> + Send + 'a,
     ) -> Self {
         Self {
@@ -87,8 +91,8 @@ impl<'a, U: Send + 'a> Generator<'a, U> {
     }
 
     pub fn new_with_pined_seq(
-        id: GeneratorId,
-        global: Arc<Global<'a, U>>,
+        id: GeneratorId<C>,
+        global: Arc<Global<'a, C, U>>,
         seq: Pin<Box<dyn Stream<Item = U> + Send + 'a>>,
     ) -> Self {
         Self {
@@ -119,7 +123,7 @@ impl<'a, U: Send + 'a> Generator<'a, U> {
         let first = self.seq.as_mut().split_at(n).await;
         (
             Generator::new_with_id(self.id, Arc::clone(&self.global), tokio_stream::iter(first)),
-            Generator::new_with_pined_seq(self.global.get_id(), self.global, self.seq),
+            Generator::new_with_pined_seq(self.global.get_id().await, self.global, self.seq),
         )
     }
 
@@ -129,7 +133,7 @@ impl<'a, U: Send + 'a> Generator<'a, U> {
     }
 }
 
-impl<'a, U: Send + 'a> AsyncIter for Generator<'a, U> {
+impl<'a, C: Client + Send + Sync, U: Send + 'a> AsyncIter for Generator<'a, C, U> {
     type Item = U;
     async fn next(&mut self) -> Option<Self::Item> {
         self.delay_strategy.delay().await;
@@ -143,13 +147,13 @@ impl<'a, U: Send + 'a> AsyncIter for Generator<'a, U> {
 
 /// A group of generators.
 #[derive(Default)]
-pub struct GeneratorGroup<'a, U: Send = Result<Op>> {
-    gens: Vec<Generator<'a, U>>,
+pub struct GeneratorGroup<'a, C: Client = TestClient, U: Send = Result<Op>> {
+    gens: Vec<Generator<'a, C, U>>,
     strategy: GeneratorGroupStrategy,
 }
 
-impl<'a, U: Send + 'a> GeneratorGroup<'a, U> {
-    pub fn new(gens: impl IntoIterator<Item = Generator<'a, U>>) -> Self {
+impl<'a, C: Client + Send + Sync, U: Send + 'a> GeneratorGroup<'a, C, U> {
+    pub fn new(gens: impl IntoIterator<Item = Generator<'a, C, U>>) -> Self {
         Self {
             gens: gens.into_iter().collect(),
             strategy: GeneratorGroupStrategy::default(),
@@ -161,11 +165,11 @@ impl<'a, U: Send + 'a> GeneratorGroup<'a, U> {
         self
     }
 
-    pub fn push_generator(&mut self, gen: Generator<'a, U>) {
+    pub fn push_generator(&mut self, gen: Generator<'a, C, U>) {
         self.gens.push(gen);
     }
 
-    pub fn remove_generator(&mut self, index: usize) -> Generator<'a, U> {
+    pub fn remove_generator(&mut self, index: usize) -> Generator<'a, C, U> {
         self.gens.remove(index)
     }
 }
@@ -198,15 +202,17 @@ macro_rules! impl_async_iter_for_generator_group {
     };
 }
 
-impl<'a, U: Send + 'a> AsyncIter for GeneratorGroup<'a, U> {
+impl<'a, C: Client + Send + Sync, U: Send + 'a> AsyncIter for GeneratorGroup<'a, C, U> {
     type Item = U;
     impl_async_iter_for_generator_group!(next, Option<Self::Item>);
     impl_async_iter_for_generator_group!(next_with_id, Option<(Self::Item, u64)>);
 }
 
 /// Convert a [`Generator`] to a [`GeneratorGroup`].
-impl<'a, U: Send + 'a> From<Generator<'a, U>> for GeneratorGroup<'a, U> {
-    fn from(value: Generator<'a, U>) -> Self {
+impl<'a, C: Client + Send + Sync, U: Send + 'a> From<Generator<'a, C, U>>
+    for GeneratorGroup<'a, C, U>
+{
+    fn from(value: Generator<'a, C, U>) -> Self {
         Self {
             gens: Vec::from([value]),
             strategy: GeneratorGroupStrategy::default(),
@@ -217,8 +223,10 @@ impl<'a, U: Send + 'a> From<Generator<'a, U>> for GeneratorGroup<'a, U> {
 /// Convert a [`GeneratorGroup`] to a [`Generator`]. Note that the delay
 /// strategy of the first generator in group will be used as the new delay
 /// strategy.
-impl<'a, U: Send + 'a> From<GeneratorGroup<'a, U>> for Generator<'a, U> {
-    fn from(mut value: GeneratorGroup<'a, U>) -> Self {
+impl<'a, C: Client + Send + Sync, U: Send + 'a> From<GeneratorGroup<'a, C, U>>
+    for Generator<'a, C, U>
+{
+    fn from(mut value: GeneratorGroup<'a, C, U>) -> Self {
         assert!(!value.gens.is_empty(), "group should not be empty");
         let mut strategy = value.strategy;
         let selected = strategy.choose(0..value.gens.len());
@@ -246,27 +254,30 @@ mod tests {
 
     #[madsim::test]
     async fn generators_and_groups_id_should_be_correct() {
-        let global = Arc::new(Global::new(1..));
-        let gen = Generator::new(Arc::clone(&global), tokio_stream::iter(global.take_seq(10)));
+        let client = Arc::new(TestClient {});
+        let global = Arc::new(Global::new(1.., client.clone()));
+        let gen =
+            Generator::new(Arc::clone(&global), tokio_stream::iter(global.take_seq(10))).await;
         assert_eq!(gen.id.get(), 0);
         let (g0, g1) = gen.split_at(5).await; // 0 1
         assert_eq!(g0.id.get(), 0);
         assert_eq!(g1.id.get(), 1);
-        let g2 = Generator::new(Arc::clone(&global), tokio_stream::iter(global.take_seq(10)));
+        let g2 = Generator::new(Arc::clone(&global), tokio_stream::iter(global.take_seq(10))).await;
         assert_eq!(g2.id.get(), 2);
         let gen_group = GeneratorGroup::new([g0, g1]);
-        assert_eq!(global.id_set.lock().unwrap().len(), 3); // 0 1 2
+        assert_eq!(global.handle_pool.lock().unwrap().len(), 3); // 0 1 2
         let _gen_merge = Generator::from(gen_group);
-        assert_eq!(global.id_set.lock().unwrap().len(), 2); // 0 2
-        let g1 = Generator::new(Arc::clone(&global), tokio_stream::iter(global.take_seq(10)));
+        assert_eq!(global.handle_pool.lock().unwrap().len(), 2); // 0 2
+        let g1 = Generator::new(Arc::clone(&global), tokio_stream::iter(global.take_seq(10))).await;
         assert_eq!(g1.id.get(), 1);
     }
 
     #[madsim::test]
     async fn test_generator_transform() {
-        let global = Global::new(1..);
+        let client = Arc::new(TestClient {});
+        let global = Arc::new(Global::new(1.., client.clone()));
         let seq = tokio_stream::iter(global.take_seq(50));
-        let gen = Generator::new(Arc::new(global), seq);
+        let gen = Generator::new(global, seq).await;
         let gen = gen.map(|x| x + 2).filter(|x| x % 3 == 0).take(5);
         let out: Vec<_> = gen.seq.collect().await;
         assert_eq!(out, vec![3, 6, 9, 12, 15]);
@@ -274,9 +285,10 @@ mod tests {
 
     #[madsim::test]
     async fn test_generator_split_at() {
-        let global = Global::new(1..);
+        let client = Arc::new(TestClient {});
+        let global = Arc::new(Global::new(1.., client.clone()));
         let seq = tokio_stream::iter(global.take_seq(5));
-        let gen = Generator::new(Arc::new(global), seq);
+        let gen = Generator::new(global, seq).await;
         let (first, second) = gen.split_at(3).await;
         let first: Vec<_> = first.seq.collect().await;
         let second: Vec<_> = second.seq.collect().await;
@@ -286,24 +298,25 @@ mod tests {
 
     #[madsim::test]
     async fn test_generator_group() {
-        let global = Arc::new(Global::new(1..));
+        let client = Arc::new(TestClient {});
+        let global = Arc::new(Global::new(1.., client.clone()));
         // Test Chain
-        let gen1 = Generator::new(global.clone(), tokio_stream::iter(global.take_seq(5)));
-        let gen2 = Generator::new(global.clone(), tokio_stream::iter(global.take_seq(5)));
+        let gen1 = Generator::new(global.clone(), tokio_stream::iter(global.take_seq(5))).await;
+        let gen2 = Generator::new(global.clone(), tokio_stream::iter(global.take_seq(5))).await;
         let gen_group =
             GeneratorGroup::new(vec![gen1, gen2]).with_strategy(GeneratorGroupStrategy::Chain);
         let res = gen_group.collect().await;
         assert_eq!(res, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
         // Test RoundRobin
-        let gen1 = Generator::new(global.clone(), tokio_stream::iter(global.take_seq(5)));
-        let gen2 = Generator::new(global.clone(), tokio_stream::iter(global.take_seq(5)));
+        let gen1 = Generator::new(global.clone(), tokio_stream::iter(global.take_seq(5))).await;
+        let gen2 = Generator::new(global.clone(), tokio_stream::iter(global.take_seq(5))).await;
         let gen_group =
             GeneratorGroup::new(vec![gen1, gen2]).with_strategy(GeneratorGroupStrategy::default());
         let res = gen_group.collect().await;
         assert_eq!(res, vec![11, 16, 12, 17, 13, 18, 14, 19, 15, 20]);
         // Test Random
-        let gen1 = Generator::new(global.clone(), tokio_stream::iter(global.take_seq(5)));
-        let gen2 = Generator::new(global.clone(), tokio_stream::iter(global.take_seq(5)));
+        let gen1 = Generator::new(global.clone(), tokio_stream::iter(global.take_seq(5))).await;
+        let gen2 = Generator::new(global.clone(), tokio_stream::iter(global.take_seq(5))).await;
         let gen_group =
             GeneratorGroup::new(vec![gen1, gen2]).with_strategy(GeneratorGroupStrategy::Random);
         let res = gen_group.collect().await;
@@ -312,20 +325,22 @@ mod tests {
 
     #[madsim::test]
     async fn test_generator_group_into_generator() {
-        let global = Arc::new(Global::new(1..));
-        let gen1 = Generator::new(global.clone(), tokio_stream::iter(global.take_seq(5)));
-        let gen2 = Generator::new(global.clone(), tokio_stream::iter(global.take_seq(5)));
+        let client = Arc::new(TestClient {});
+        let global = Arc::new(Global::new(1.., client.clone()));
+        let gen1 = Generator::new(global.clone(), tokio_stream::iter(global.take_seq(5))).await;
+        let gen2 = Generator::new(global.clone(), tokio_stream::iter(global.take_seq(5))).await;
         let gen_group = GeneratorGroup::new(vec![gen1, gen2]);
-        let gen: Generator<_> = gen_group.into();
+        let gen: Generator<_, _> = gen_group.into();
         let res = gen.collect().await;
         assert_eq!(res, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     }
 
     #[madsim::test]
     async fn test_generator_group_get_next_with_id() {
-        let global = Arc::new(Global::new(1..));
-        let g1 = Generator::new(global.clone(), tokio_stream::iter(global.take_seq(5)));
-        let g2 = Generator::new(global.clone(), tokio_stream::iter(global.take_seq(5)));
+        let client = Arc::new(TestClient {});
+        let global = Arc::new(Global::new(1.., client.clone()));
+        let g1 = Generator::new(global.clone(), tokio_stream::iter(global.take_seq(5))).await;
+        let g2 = Generator::new(global.clone(), tokio_stream::iter(global.take_seq(5))).await;
         let mut gen_group = GeneratorGroup::new([g1, g2]);
         assert_eq!(gen_group.next_with_id().await.unwrap(), (1, 0));
         assert_eq!(gen_group.next_with_id().await.unwrap(), (6, 1));

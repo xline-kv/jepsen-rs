@@ -1,8 +1,9 @@
 //! NOTE: Requires java 21 due to https://github.com/jepsen-io/jepsen/issues/585
 
 mod checker;
+pub mod client;
 mod generator;
-mod history;
+pub mod history;
 mod op;
 pub mod utils;
 
