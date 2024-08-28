@@ -145,9 +145,9 @@ pub struct GeneratorGroup<'a, U: Send = Result<Op>> {
 }
 
 impl<'a, U: Send + 'a> GeneratorGroup<'a, U> {
-    pub fn new(gens: impl Into<Vec<Generator<'a, U>>>) -> Self {
+    pub fn new(gens: impl IntoIterator<Item = Generator<'a, U>>) -> Self {
         Self {
-            gens: gens.into(),
+            gens: gens.into_iter().collect(),
             strategy: GeneratorGroupStrategy::default(),
         }
     }
@@ -163,15 +163,6 @@ impl<'a, U: Send + 'a> GeneratorGroup<'a, U> {
 
     pub fn remove_generator(&mut self, index: usize) -> Generator<'a, U> {
         self.gens.remove(index)
-    }
-}
-
-impl<'a, U: Send + 'a> From<Generator<'a, U>> for GeneratorGroup<'a, U> {
-    fn from(value: Generator<'a, U>) -> Self {
-        Self {
-            gens: Vec::from([value]),
-            strategy: GeneratorGroupStrategy::default(),
-        }
     }
 }
 
@@ -202,7 +193,19 @@ impl<'a, U: Send + 'a> AsyncIter for GeneratorGroup<'a, U> {
     }
 }
 
-/// Convert a [`GeneratorGroup`] to a [`Generator`].
+/// Convert a [`Generator`] to a [`GeneratorGroup`].
+impl<'a, U: Send + 'a> From<Generator<'a, U>> for GeneratorGroup<'a, U> {
+    fn from(value: Generator<'a, U>) -> Self {
+        Self {
+            gens: Vec::from([value]),
+            strategy: GeneratorGroupStrategy::default(),
+        }
+    }
+}
+
+/// Convert a [`GeneratorGroup`] to a [`Generator`]. Note that the delay
+/// strategy of the first generator in group will be used as the new delay
+/// strategy.
 impl<'a, U: Send + 'a> From<GeneratorGroup<'a, U>> for Generator<'a, U> {
     fn from(mut value: GeneratorGroup<'a, U>) -> Self {
         assert!(!value.gens.is_empty(), "group should not be empty");
@@ -228,6 +231,24 @@ mod tests {
         let mut out = gen.gen_n(10);
         out.sort();
         assert_eq!(out, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    }
+
+    #[madsim::test]
+    async fn generators_and_groups_id_should_be_correct() {
+        let global = Arc::new(Global::new(1..));
+        let gen = Generator::new(Arc::clone(&global), tokio_stream::iter(global.take_seq(10)));
+        assert_eq!(gen.id.get(), 0);
+        let (g0, g1) = gen.split_at(5).await; // 0 1
+        assert_eq!(g0.id.get(), 0);
+        assert_eq!(g1.id.get(), 1);
+        let g2 = Generator::new(Arc::clone(&global), tokio_stream::iter(global.take_seq(10)));
+        assert_eq!(g2.id.get(), 2);
+        let gen_group = GeneratorGroup::new([g0, g1]);
+        assert_eq!(global.id_set.lock().unwrap().len(), 3); // 0 1 2
+        let _gen_merge = Generator::from(gen_group);
+        assert_eq!(global.id_set.lock().unwrap().len(), 2); // 0 2
+        let g1 = Generator::new(Arc::clone(&global), tokio_stream::iter(global.take_seq(10)));
+        assert_eq!(g1.id.get(), 1);
     }
 
     #[madsim::test]
