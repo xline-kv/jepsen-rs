@@ -33,6 +33,9 @@ impl<S: ?Sized + Stream> ExtraStreamExt for S {}
 pub trait AsyncIter {
     type Item;
     fn next(&mut self) -> impl std::future::Future<Output = Option<Self::Item>> + Send;
+    fn next_with_id(
+        &mut self,
+    ) -> impl std::future::Future<Output = Option<(Self::Item, u64)>> + Send;
     fn collect(mut self) -> impl std::future::Future<Output = Vec<Self::Item>> + Send
     where
         Self: Send + Sized,

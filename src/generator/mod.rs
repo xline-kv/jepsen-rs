@@ -135,6 +135,10 @@ impl<'a, U: Send + 'a> AsyncIter for Generator<'a, U> {
         self.delay_strategy.delay().await;
         self.seq.next().await
     }
+    async fn next_with_id(&mut self) -> Option<(Self::Item, u64)> {
+        self.delay_strategy.delay().await;
+        self.seq.next().await.map(|x| (x, self.id.get()))
+    }
 }
 
 /// A group of generators.
@@ -166,31 +170,38 @@ impl<'a, U: Send + 'a> GeneratorGroup<'a, U> {
     }
 }
 
-impl<'a, U: Send + 'a> AsyncIter for GeneratorGroup<'a, U> {
-    type Item = U;
-    /// Select one generator to generate `Op` by group strategy. If it's empty,
-    /// drop it and try to use another. If all [`Generator`]s in the group
-    /// are empty, returns None.
-    async fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            if self.gens.is_empty() {
-                return None;
-            }
-            let selected = self.strategy.choose(0..self.gens.len());
-            match self
-                .gens
-                .get_mut(selected)
-                .expect("selected index should be in the vec")
-                .next()
-                .await
-            {
-                Some(op) => return Some(op),
-                None => {
-                    self.remove_generator(selected);
+macro_rules! impl_async_iter_for_generator_group {
+    ($func: ident, $return_type: ty) => {
+        /// Select one generator to generate `Op` by group strategy. If it's empty,
+        /// drop it and try to use another. If all [`Generator`]s in the group
+        /// are empty, returns None.
+        async fn $func(&mut self) -> $return_type {
+            loop {
+                if self.gens.is_empty() {
+                    return None;
+                }
+                let selected = self.strategy.choose(0..self.gens.len());
+                match self
+                    .gens
+                    .get_mut(selected)
+                    .expect("selected index should be in the vec")
+                    .$func()
+                    .await
+                {
+                    x @ Some(_) => return x,
+                    None => {
+                        self.remove_generator(selected);
+                    }
                 }
             }
         }
-    }
+    };
+}
+
+impl<'a, U: Send + 'a> AsyncIter for GeneratorGroup<'a, U> {
+    type Item = U;
+    impl_async_iter_for_generator_group!(next, Option<Self::Item>);
+    impl_async_iter_for_generator_group!(next_with_id, Option<(Self::Item, u64)>);
 }
 
 /// Convert a [`Generator`] to a [`GeneratorGroup`].
@@ -308,5 +319,17 @@ mod tests {
         let gen: Generator<_> = gen_group.into();
         let res = gen.collect().await;
         assert_eq!(res, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    }
+
+    #[madsim::test]
+    async fn test_generator_group_get_next_with_id() {
+        let global = Arc::new(Global::new(1..));
+        let g1 = Generator::new(global.clone(), tokio_stream::iter(global.take_seq(5)));
+        let g2 = Generator::new(global.clone(), tokio_stream::iter(global.take_seq(5)));
+        let mut gen_group = GeneratorGroup::new([g1, g2]);
+        assert_eq!(gen_group.next_with_id().await.unwrap(), (1, 0));
+        assert_eq!(gen_group.next_with_id().await.unwrap(), (6, 1));
+        assert_eq!(gen_group.next_with_id().await.unwrap(), (2, 0));
+        assert_eq!(gen_group.next_with_id().await.unwrap(), (7, 1));
     }
 }
