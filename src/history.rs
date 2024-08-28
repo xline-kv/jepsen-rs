@@ -12,7 +12,7 @@ use crate::{
     op::{Op, OpFunctionType},
 };
 
-type ErrorType = Vec<String>;
+pub type ErrorType = Vec<String>;
 
 /// This struct is used to serialize the *final* history structure to json, and
 /// parse to Clojure's history data structure.
@@ -42,11 +42,11 @@ pub enum HistoryType {
 
 /// A list of Serializable history
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SerializableHistoryList<F = OpFunctionType, ERR = ErrorType>(
+pub struct SerializableHistoryList<ERR = ErrorType, F = OpFunctionType>(
     pub Vec<SerializableHistory<F, ERR>>,
 );
 
-impl Default for SerializableHistoryList {
+impl<T, F> Default for SerializableHistoryList<T, F> {
     fn default() -> Self {
         Self(vec![])
     }
@@ -64,15 +64,20 @@ impl DerefMut for SerializableHistoryList {
     }
 }
 
-impl<ERR> SerializableHistoryList<OpFunctionType, ERR> {
+impl<ERR: Send> SerializableHistoryList<ERR, OpFunctionType> {
     /// Get the current timestamp.
-    fn timestamp<C: Client>(&self, global: &Arc<Global<C>>) -> u64 {
+    fn timestamp<C: Client>(&self, global: &Arc<Global<C, ERR>>) -> u64 {
         time::Instant::now()
             .duration_since(global.start_time)
             .as_nanos() as u64
     }
     /// Push an invoke history to the history list.
-    pub fn push_invoke<C: Client>(&mut self, global: &Arc<Global<C>>, process: u64, value: Op) {
+    pub fn push_invoke<C: Client>(
+        &mut self,
+        global: &Arc<Global<C, ERR>>,
+        process: u64,
+        value: Op,
+    ) {
         let f: OpFunctionType = (&value).into();
         let item = SerializableHistory {
             index: self.0.len() as u64,
@@ -89,7 +94,7 @@ impl<ERR> SerializableHistoryList<OpFunctionType, ERR> {
     /// Push a result to the history list.
     pub fn push_result<C: Client>(
         &mut self,
-        global: &Arc<Global<C>>,
+        global: &Arc<Global<C, ERR>>,
         process: u64,
         result_type: HistoryType,
         value: Op,

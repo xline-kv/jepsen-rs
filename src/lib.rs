@@ -1,10 +1,10 @@
 //! NOTE: Requires java 21 due to https://github.com/jepsen-io/jepsen/issues/585
 
-mod checker;
+pub mod checker;
 pub mod client;
-mod generator;
+pub mod generator;
 pub mod history;
-mod op;
+pub mod op;
 pub mod utils;
 
 use std::{borrow::Borrow, cell::OnceCell};

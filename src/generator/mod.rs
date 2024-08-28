@@ -13,6 +13,7 @@ use tokio_stream::{Stream, StreamExt};
 
 use crate::{
     client::{Client, TestClient},
+    history::ErrorType,
     op::Op,
     utils::{AsyncIter, ExtraStreamExt},
 };
@@ -52,20 +53,20 @@ impl RawGenerator for RangeFrom<i32> {
 }
 
 /// The generator. It's a wrapper for the clojure seq and global context.
-pub struct Generator<'a, C: Client = TestClient, U: Send = Result<Op>> {
+pub struct Generator<'a, C: Client, U: Send = Result<Op>, ERR: Send + 'a = ErrorType> {
     /// generator id
     pub id: GeneratorId<C>,
     /// A reference to the global context
-    pub global: Arc<Global<'a, C, U>>,
+    pub global: Arc<Global<'a, C, U, ERR>>,
     /// The sequence (stream) of generator. Note that the seq is finite.
     pub seq: Pin<Box<dyn Stream<Item = U> + Send + 'a>>,
     /// The delay strategy between every `next()` function
     pub delay_strategy: DelayStrategy,
 }
 
-impl<'a, C: Client, U: Send + 'a> Generator<'a, C, U> {
+impl<'a, C: Client, U: Send + 'a, ERR: 'a + Send> Generator<'a, C, U, ERR> {
     pub async fn new(
-        global: Arc<Global<'a, C, U>>,
+        global: Arc<Global<'a, C, U, ERR>>,
         seq: impl Stream<Item = U> + Send + 'a,
     ) -> Self {
         let id = global.get_id().await;
@@ -79,7 +80,7 @@ impl<'a, C: Client, U: Send + 'a> Generator<'a, C, U> {
 
     pub fn new_with_id(
         id: GeneratorId<C>,
-        global: Arc<Global<'a, C, U>>,
+        global: Arc<Global<'a, C, U, ERR>>,
         seq: impl Stream<Item = U> + Send + 'a,
     ) -> Self {
         Self {
@@ -92,7 +93,7 @@ impl<'a, C: Client, U: Send + 'a> Generator<'a, C, U> {
 
     pub fn new_with_pined_seq(
         id: GeneratorId<C>,
-        global: Arc<Global<'a, C, U>>,
+        global: Arc<Global<'a, C, U, ERR>>,
         seq: Pin<Box<dyn Stream<Item = U> + Send + 'a>>,
     ) -> Self {
         Self {
@@ -133,7 +134,9 @@ impl<'a, C: Client, U: Send + 'a> Generator<'a, C, U> {
     }
 }
 
-impl<'a, C: Client + Send + Sync, U: Send + 'a> AsyncIter for Generator<'a, C, U> {
+impl<'a, C: Client + Send + Sync, ERR: 'a + Send, U: Send + 'a> AsyncIter
+    for Generator<'a, C, U, ERR>
+{
     type Item = U;
     async fn next(&mut self) -> Option<Self::Item> {
         self.delay_strategy.delay().await;
@@ -147,13 +150,13 @@ impl<'a, C: Client + Send + Sync, U: Send + 'a> AsyncIter for Generator<'a, C, U
 
 /// A group of generators.
 #[derive(Default)]
-pub struct GeneratorGroup<'a, C: Client = TestClient, U: Send = Result<Op>> {
-    gens: Vec<Generator<'a, C, U>>,
+pub struct GeneratorGroup<'a, C: Client, ERR: 'a + Send, U: Send = Result<Op>> {
+    gens: Vec<Generator<'a, C, U, ERR>>,
     strategy: GeneratorGroupStrategy,
 }
 
-impl<'a, C: Client + Send + Sync, U: Send + 'a> GeneratorGroup<'a, C, U> {
-    pub fn new(gens: impl IntoIterator<Item = Generator<'a, C, U>>) -> Self {
+impl<'a, C: Client + Send + Sync, ERR: 'a + Send, U: Send + 'a> GeneratorGroup<'a, C, ERR, U> {
+    pub fn new(gens: impl IntoIterator<Item = Generator<'a, C, U, ERR>>) -> Self {
         Self {
             gens: gens.into_iter().collect(),
             strategy: GeneratorGroupStrategy::default(),
@@ -165,11 +168,11 @@ impl<'a, C: Client + Send + Sync, U: Send + 'a> GeneratorGroup<'a, C, U> {
         self
     }
 
-    pub fn push_generator(&mut self, gen: Generator<'a, C, U>) {
+    pub fn push_generator(&mut self, gen: Generator<'a, C, U, ERR>) {
         self.gens.push(gen);
     }
 
-    pub fn remove_generator(&mut self, index: usize) -> Generator<'a, C, U> {
+    pub fn remove_generator(&mut self, index: usize) -> Generator<'a, C, U, ERR> {
         self.gens.remove(index)
     }
 }
@@ -202,17 +205,19 @@ macro_rules! impl_async_iter_for_generator_group {
     };
 }
 
-impl<'a, C: Client + Send + Sync, U: Send + 'a> AsyncIter for GeneratorGroup<'a, C, U> {
+impl<'a, C: Client + Send + Sync, U: Send + 'a, ERR: 'a + Send> AsyncIter
+    for GeneratorGroup<'a, C, ERR, U>
+{
     type Item = U;
     impl_async_iter_for_generator_group!(next, Option<Self::Item>);
     impl_async_iter_for_generator_group!(next_with_id, Option<(Self::Item, u64)>);
 }
 
 /// Convert a [`Generator`] to a [`GeneratorGroup`].
-impl<'a, C: Client + Send + Sync, U: Send + 'a> From<Generator<'a, C, U>>
-    for GeneratorGroup<'a, C, U>
+impl<'a, C: Client + Send + Sync, U: Send + 'a, ERR: 'a + Send> From<Generator<'a, C, U, ERR>>
+    for GeneratorGroup<'a, C, ERR, U>
 {
-    fn from(value: Generator<'a, C, U>) -> Self {
+    fn from(value: Generator<'a, C, U, ERR>) -> Self {
         Self {
             gens: Vec::from([value]),
             strategy: GeneratorGroupStrategy::default(),
@@ -223,10 +228,10 @@ impl<'a, C: Client + Send + Sync, U: Send + 'a> From<Generator<'a, C, U>>
 /// Convert a [`GeneratorGroup`] to a [`Generator`]. Note that the delay
 /// strategy of the first generator in group will be used as the new delay
 /// strategy.
-impl<'a, C: Client + Send + Sync, U: Send + 'a> From<GeneratorGroup<'a, C, U>>
-    for Generator<'a, C, U>
+impl<'a, C: Client + Send + Sync, U: Send + 'a, ERR: 'a + Send> From<GeneratorGroup<'a, C, ERR, U>>
+    for Generator<'a, C, U, ERR>
 {
-    fn from(mut value: GeneratorGroup<'a, C, U>) -> Self {
+    fn from(mut value: GeneratorGroup<'a, C, ERR, U>) -> Self {
         assert!(!value.gens.is_empty(), "group should not be empty");
         let mut strategy = value.strategy;
         let selected = strategy.choose(0..value.gens.len());
@@ -330,7 +335,7 @@ mod tests {
         let gen1 = Generator::new(global.clone(), tokio_stream::iter(global.take_seq(5))).await;
         let gen2 = Generator::new(global.clone(), tokio_stream::iter(global.take_seq(5))).await;
         let gen_group = GeneratorGroup::new(vec![gen1, gen2]);
-        let gen: Generator<_, _> = gen_group.into();
+        let gen: Generator<_, _, i32> = gen_group.into();
         let res = gen.collect().await;
         assert_eq!(res, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
     }

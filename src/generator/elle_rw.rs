@@ -83,7 +83,7 @@ impl Iterator for ElleRwGenerator {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{generator::RawGenerator, init_jvm};
+    use crate::generator::RawGenerator;
 
     #[test]
     fn elle_gen_should_work() -> Result<(), Box<dyn std::error::Error>> {

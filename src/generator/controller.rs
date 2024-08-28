@@ -70,8 +70,6 @@ impl GeneratorGroupStrategy {
 
 #[cfg(test)]
 mod tests {
-    use std::usize;
-
     use super::*;
 
     #[test]

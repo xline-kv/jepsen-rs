@@ -7,7 +7,11 @@ use anyhow::Result;
 use madsim::{runtime::NodeHandle, time};
 
 use super::RawGenerator;
-use crate::{client::Client, history::SerializableHistoryList, op::Op};
+use crate::{
+    client::{Client, TestClient},
+    history::{ErrorType, SerializableHistoryList},
+    op::Op,
+};
 
 /// The id of the generator. Each [`GeneratorId`] corresponds to one thread.
 #[derive(Clone)]
@@ -47,10 +51,11 @@ impl<C: Client> GeneratorId<C> {
     /// assoc with this id.
     async fn alloc_id(id_set: &Arc<Mutex<BTreeMap<u64, NodeHandle>>>, client: &Arc<C>) -> u64 {
         let id = Self::get_next_id(id_set);
+        let new_handle = client.new_handle().await;
         let res = id_set
             .lock()
             .expect("Failed to lock thread pool")
-            .insert(id, client.new_handle().await);
+            .insert(id, new_handle);
         debug_assert!(res.is_none(), "insert must be success");
         id
     }
@@ -73,7 +78,7 @@ impl<C: Client> Drop for GeneratorId<C> {
 
 /// The global context
 #[non_exhaustive]
-pub struct Global<'a, C: Client, T: Send = Result<Op>> {
+pub struct Global<'a, C: Client, ERR: Send = ErrorType, T: Send = Result<Op>> {
     /// The id allocator and handle pool
     pub handle_pool: Arc<Mutex<BTreeMap<u64, NodeHandle>>>,
     /// The original raw generator
@@ -81,21 +86,22 @@ pub struct Global<'a, C: Client, T: Send = Result<Op>> {
     /// The start time of the simulation
     pub start_time: time::Instant,
     /// The history list
-    pub history: Mutex<SerializableHistoryList>,
+    pub history: Mutex<SerializableHistoryList<ERR>>,
     /// The client
     client: Arc<C>,
 }
 
-impl<'a, C: Client, T: Send + 'a> Global<'a, C, T> {
+impl<'a, C: Client, ERR: Send, T: Send + 'a> Global<'a, C, ERR, T> {
     /// Create a new global context
     pub fn new(gen: impl RawGenerator<Item = T> + Send + 'a, client: Arc<C>) -> Self {
+        let h: SerializableHistoryList<ERR> = Default::default();
         Self {
             handle_pool: Mutex::new(BTreeMap::new()).into(),
             gen: Mutex::new(Some(
                 Box::new(gen) as Box<dyn RawGenerator<Item = T> + Send + 'a>
             )),
             start_time: time::Instant::now(),
-            history: Mutex::new(SerializableHistoryList::default()),
+            history: Mutex::new(h),
             client,
         }
     }
@@ -112,6 +118,16 @@ impl<'a, C: Client, T: Send + 'a> Global<'a, C, T> {
         } else {
             Box::new(std::iter::empty()) as Box<dyn Iterator<Item = T> + Send>
         }
+    }
+
+    /// Get the handle of the generator id.
+    pub fn use_handle<R>(&self, id: u64, f: impl FnOnce(&NodeHandle) -> R) -> R {
+        f(self
+            .handle_pool
+            .lock()
+            .expect("Failed to lock thread pool")
+            .get(&id)
+            .expect("handle not found"))
     }
 }
 
