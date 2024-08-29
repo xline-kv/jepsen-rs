@@ -7,6 +7,7 @@ use std::{
 };
 
 use anyhow::Result;
+use log::{debug, info, trace};
 use madsim::runtime::NodeHandle;
 use tokio::task::JoinHandle;
 
@@ -83,6 +84,7 @@ impl JepsenClient {
 
     pub fn drop_senders(&self) {
         self.sender_map.lock().unwrap().clear();
+        info!("all senders in client dropped.");
     }
     /// Recursively handle an op, return the result.
     pub fn handle_op_inner(&self, op: Op) -> Result<Op, String> {
@@ -120,24 +122,32 @@ impl Client for JepsenClient {
         let (tx, rx) = mpsc::channel();
         let x = self.node_handle.spawn(async move {
             while let Ok(op) = rx.recv() {
+                trace!("Jepsen client thread {} receive an op: {:?}", id, op);
                 self.handle_op(id, op).await;
             }
         });
         let res = lock.insert(id, tx);
         debug_assert!(res.is_none(), "client alloc thread in duplicate id");
         self.join_handles.lock().unwrap().push(x);
+        info!("alloc a new thread for id {}", id);
     }
 
     fn new_generator(
         &self,
         n: usize,
     ) -> impl std::future::Future<Output = Generator<'static, Op, Self::ERR>> + Send {
+        debug!("Jepsen client make new generator with {} ops", n);
         let global = self.global.clone();
         let seq = global.take_seq(n);
         Generator::new(global, tokio_stream::iter(seq))
     }
 
     async fn handle_op(&'static self, id: u64, op: Op) {
+        trace!(
+            "Jepsen client thread {} receive and handles an op: {:?}",
+            id,
+            op
+        );
         self.global
             .history
             .lock()
@@ -183,11 +193,11 @@ impl Client for JepsenClient {
             }
         }
         self.drop_senders();
-
+        info!("start to wait all receiver threads to exit");
         for handle in self.join_handles.lock().unwrap().drain(..) {
             handle.await.expect("join thread error");
         }
-
+        info!("all receiver threads exited, check result...");
         let check_result = ElleRwChecker::default().check(
             &self.global.history.lock().unwrap(),
             Some(CheckOption::default()),

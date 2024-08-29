@@ -3,11 +3,12 @@ pub mod controller;
 pub mod elle_rw;
 #[cfg(test)]
 use std::ops::{AddAssign, RangeFrom};
-use std::{pin::Pin, sync::Arc};
+use std::{fmt, pin::Pin, sync::Arc};
 
 use context::GeneratorId;
 pub use context::Global;
 use controller::{DelayStrategy, GeneratorGroupStrategy};
+use log::{debug, trace};
 use tokio_stream::{Stream, StreamExt};
 
 use crate::{
@@ -29,6 +30,7 @@ pub trait RawGenerator {
         for _ in 0..n {
             out.push(self.gen());
         }
+        trace!("takes {} items out from RawGenerator", n);
         out
     }
 }
@@ -51,7 +53,7 @@ impl RawGenerator for RangeFrom<i32> {
 }
 
 /// The generator. It's a wrapper for the clojure seq and global context.
-pub struct Generator<'a, U: Send = Op, ERR: Send + 'a = ErrorType> {
+pub struct Generator<'a, U: Send + fmt::Debug = Op, ERR: Send + 'a = ErrorType> {
     /// generator id
     pub id: GeneratorId,
     /// A reference to the global context
@@ -64,7 +66,7 @@ pub struct Generator<'a, U: Send = Op, ERR: Send + 'a = ErrorType> {
     pub delay_strategy: DelayStrategy,
 }
 
-impl<'a, U: Send + 'a, ERR: 'a + Send> Generator<'a, U, ERR> {
+impl<'a, U: Send + fmt::Debug + 'a, ERR: 'a + Send> Generator<'a, U, ERR> {
     pub async fn new(
         global: Arc<Global<'a, U, ERR>>,
         seq: impl Stream<Item = U> + Send + 'a,
@@ -134,29 +136,41 @@ impl<'a, U: Send + 'a, ERR: 'a + Send> Generator<'a, U, ERR> {
     }
 }
 
-impl<'a, ERR: 'a + Send, U: Send + 'a> AsyncIter for Generator<'a, U, ERR> {
+impl<'a, ERR: 'a + Send, U: Send + fmt::Debug + 'a> AsyncIter for Generator<'a, U, ERR> {
     type Item = U;
     async fn next(&mut self) -> Option<Self::Item> {
         self.delay_strategy.delay().await;
-        self.seq.next().await
+        let item = self.seq.next().await;
+        match item.as_ref() {
+            Some(item) => {
+                trace!("generator {} yields an item: {:?}", self.id.get(), item);
+            }
+            None => {
+                trace!("generator {} yields None", self.id.get());
+            }
+        }
+        item
     }
     async fn next_with_id(&mut self) -> Option<(Self::Item, u64)> {
-        self.delay_strategy.delay().await;
-        self.seq.next().await.map(|x| (x, self.id.get()))
+        self.next().await.map(|x| (x, self.id.get()))
     }
 }
 
 /// A group of generators.
 #[derive(Default)]
-pub struct GeneratorGroup<'a, U: Send = Op, ERR: 'a + Send = ErrorType> {
+pub struct GeneratorGroup<'a, U: Send + fmt::Debug = Op, ERR: 'a + Send = ErrorType> {
     gens: Vec<Generator<'a, U, ERR>>,
     strategy: GeneratorGroupStrategy,
 }
 
-impl<'a, ERR: 'a + Send, U: Send + 'a> GeneratorGroup<'a, U, ERR> {
+impl<'a, ERR: 'a + Send, U: Send + fmt::Debug + 'a> GeneratorGroup<'a, U, ERR> {
     pub fn new(gens: impl IntoIterator<Item = Generator<'a, U, ERR>>) -> Self {
+        let gens: Vec<_> = gens.into_iter().collect();
+        debug!("generator group created with {} generators", gens.len());
+        let ids: Vec<_> = gens.iter().map(|x| x.id.get()).collect();
+        debug!("ids: {:?}", ids);
         Self {
-            gens: gens.into_iter().collect(),
+            gens,
             strategy: GeneratorGroupStrategy::default(),
         }
     }
@@ -203,14 +217,16 @@ macro_rules! impl_async_iter_for_generator_group {
     };
 }
 
-impl<'a, U: Send + 'a, ERR: 'a + Send> AsyncIter for GeneratorGroup<'a, U, ERR> {
+impl<'a, U: Send + fmt::Debug + 'a, ERR: 'a + Send> AsyncIter for GeneratorGroup<'a, U, ERR> {
     type Item = U;
     impl_async_iter_for_generator_group!(next, Option<Self::Item>);
     impl_async_iter_for_generator_group!(next_with_id, Option<(Self::Item, u64)>);
 }
 
 /// Convert a [`Generator`] to a [`GeneratorGroup`].
-impl<'a, U: Send + 'a, ERR: 'a + Send> From<Generator<'a, U, ERR>> for GeneratorGroup<'a, U, ERR> {
+impl<'a, U: Send + fmt::Debug + 'a, ERR: 'a + Send> From<Generator<'a, U, ERR>>
+    for GeneratorGroup<'a, U, ERR>
+{
     fn from(value: Generator<'a, U, ERR>) -> Self {
         Self {
             gens: Vec::from([value]),
@@ -222,7 +238,9 @@ impl<'a, U: Send + 'a, ERR: 'a + Send> From<Generator<'a, U, ERR>> for Generator
 /// Convert a [`GeneratorGroup`] to a [`Generator`]. Note that the delay
 /// strategy of the first generator in group will be used as the new delay
 /// strategy.
-impl<'a, U: Send + 'a, ERR: 'a + Send> From<GeneratorGroup<'a, U, ERR>> for Generator<'a, U, ERR> {
+impl<'a, U: Send + fmt::Debug + 'a, ERR: 'a + Send> From<GeneratorGroup<'a, U, ERR>>
+    for Generator<'a, U, ERR>
+{
     fn from(mut value: GeneratorGroup<'a, U, ERR>) -> Self {
         assert!(!value.gens.is_empty(), "group should not be empty");
         let mut strategy = value.strategy;

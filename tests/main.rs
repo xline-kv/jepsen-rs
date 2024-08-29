@@ -6,6 +6,7 @@ use jepsen_rs::{
     generator::{controller::GeneratorGroupStrategy, elle_rw::ElleRwGenerator, GeneratorGroup},
     op::Op,
 };
+use log::{info, LevelFilter};
 
 #[derive(Debug, Clone, Default)]
 pub struct TestCluster {
@@ -29,6 +30,12 @@ impl ElleRwClusterClient for TestCluster {
 
 #[test]
 pub fn intergration_test() -> Result<()> {
+    _ = pretty_env_logger::formatted_builder()
+        .filter_level(log::LevelFilter::Debug)
+        .format_timestamp_millis()
+        .filter_module("j4rs", LevelFilter::Info)
+        .parse_default_env()
+        .try_init();
     let rt = madsim::runtime::Runtime::new();
     let handle = rt.handle();
     let node_handle = handle.create_node().build();
@@ -36,7 +43,7 @@ pub fn intergration_test() -> Result<()> {
     let raw_gen = ElleRwGenerator::new()?;
     let client = JepsenClient::new_with_handle(cluster, raw_gen, node_handle);
     let client = Box::leak(client.into());
-    println!("client created");
+    info!("intergration_test: client created");
 
     rt.block_on(async move {
         // get generators, transform and merge them
@@ -46,13 +53,12 @@ pub fn intergration_test() -> Result<()> {
             .filter(|o| matches!(o, Op::Txn(txn) if txn.len() == 1));
         let g2 = client.new_generator(50).await;
         let g3 = client.new_generator(50).await;
-        println!("generators created");
-
+        info!("intergration_test: generators created");
         let gen_g = GeneratorGroup::new([g1, g2, g3])
             .with_strategy(GeneratorGroupStrategy::RoundRobin(usize::MAX));
-        println!("generator group created");
+        info!("generator group created");
         let res = client.run(gen_g).await.unwrap_or_else(|e| panic!("{}", e));
-        println!("{:?}", res);
+        info!("history checked result: {:?}", res);
     });
     Ok(())
 }
