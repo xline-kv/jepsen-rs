@@ -8,14 +8,14 @@ use madsim::{runtime::NodeHandle, time};
 
 use super::RawGenerator;
 use crate::{
-    client::{Client, TestClient},
+    client::Client,
     history::{ErrorType, SerializableHistoryList},
-    op::Op,
+    op::{Op, OpFunctionType},
 };
 
 type IdSetType = Arc<Mutex<BTreeSet<u64>>>;
 
-/// The id of the generator. Each [`GeneratorId`] corresponds to one thread.
+/// The id allocator.
 #[derive(Clone, Debug)]
 pub struct GeneratorId {
     id: u64,
@@ -87,7 +87,7 @@ pub struct Global<'a, C: Send + Client, T: Send = Result<Op>, ERR: Send = ErrorT
     /// The start time of the simulation
     pub start_time: time::Instant,
     /// The history list
-    pub history: Mutex<SerializableHistoryList<ERR>>,
+    pub history: Mutex<SerializableHistoryList<OpFunctionType, ERR>>,
     /// The client
     client: Arc<C>,
 }
@@ -95,7 +95,7 @@ pub struct Global<'a, C: Send + Client, T: Send = Result<Op>, ERR: Send = ErrorT
 impl<'a, C: Send + Client, ERR: Send, T: Send + 'a> Global<'a, C, T, ERR> {
     /// Create a new global context
     pub fn new(gen: impl RawGenerator<Item = T> + Send + 'a, client: Arc<C>) -> Self {
-        let h: SerializableHistoryList<ERR> = Default::default();
+        let h: SerializableHistoryList<OpFunctionType, ERR> = Default::default();
         Self {
             id_set: Mutex::new(BTreeSet::new()).into(),
             gen: Mutex::new(Some(
@@ -125,7 +125,6 @@ impl<'a, C: Send + Client, ERR: Send, T: Send + 'a> Global<'a, C, T, ERR> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::client::TestClient;
 
     #[madsim::test]
     async fn test_alloc_and_free_id() {

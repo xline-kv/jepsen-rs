@@ -1,4 +1,5 @@
 use j4rs::Instance;
+use serde::Serialize;
 
 use super::{CheckOption, SerializableCheckResult};
 use crate::{
@@ -24,9 +25,9 @@ impl Default for ElleRwChecker {
 }
 
 impl super::Check for ElleRwChecker {
-    fn check(
+    fn check<F: Serialize, ERR: Serialize>(
         &self,
-        history: SerializableHistoryList,
+        history: &SerializableHistoryList<F, ERR>,
         options: Option<CheckOption>,
     ) -> anyhow::Result<SerializableCheckResult> {
         init_jvm();
@@ -56,7 +57,7 @@ mod tests {
           { "index": 3, "type": "ok", "f": "txn", "value": [["r", 2, 1]], "time": 3967733708, "process": 1, "error": null } 
         ]"#;
         let history: SerializableHistoryList = serde_json::from_str(history_str)?;
-        let res = checker.check(history, None)?;
+        let res = checker.check(&history, None)?;
         println!("{:#?}", res);
         // assert!(res.valid);
         Ok(())

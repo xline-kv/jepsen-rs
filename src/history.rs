@@ -3,6 +3,7 @@ use std::{
     sync::Arc,
 };
 
+use anyhow::Result;
 use madsim::time;
 use serde::{Deserialize, Serialize};
 
@@ -11,7 +12,6 @@ use crate::{
     generator::Global,
     op::{Op, OpFunctionType},
 };
-
 pub type ErrorType = Vec<String>;
 
 /// This struct is used to serialize the *final* history structure to json, and
@@ -42,7 +42,7 @@ pub enum HistoryType {
 
 /// A list of Serializable history
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SerializableHistoryList<ERR = ErrorType, F = OpFunctionType>(
+pub struct SerializableHistoryList<F = OpFunctionType, ERR = ErrorType>(
     pub Vec<SerializableHistory<F, ERR>>,
 );
 
@@ -64,9 +64,9 @@ impl DerefMut for SerializableHistoryList {
     }
 }
 
-impl<ERR: Send> SerializableHistoryList<ERR, OpFunctionType> {
+impl<ERR: Send> SerializableHistoryList<OpFunctionType, ERR> {
     /// Get the current timestamp.
-    fn timestamp<C: Client + Send + Sync>(&self, global: &Arc<Global<C, ERR>>) -> u64 {
+    fn timestamp<C: Client + Send + Sync>(&self, global: &Arc<Global<C, Result<Op>, ERR>>) -> u64 {
         time::Instant::now()
             .duration_since(global.start_time)
             .as_nanos() as u64
@@ -74,7 +74,7 @@ impl<ERR: Send> SerializableHistoryList<ERR, OpFunctionType> {
     /// Push an invoke history to the history list.
     pub fn push_invoke<C: Client + Send + Sync>(
         &mut self,
-        global: &Arc<Global<C, ERR>>,
+        global: &Arc<Global<C, Result<Op>, ERR>>,
         process: u64,
         value: Op,
     ) {
@@ -94,7 +94,7 @@ impl<ERR: Send> SerializableHistoryList<ERR, OpFunctionType> {
     /// Push a result to the history list.
     pub fn push_result<C: Client + Send + Sync>(
         &mut self,
-        global: &Arc<Global<C, ERR>>,
+        global: &Arc<Global<C, Result<Op>, ERR>>,
         process: u64,
         result_type: HistoryType,
         value: Op,

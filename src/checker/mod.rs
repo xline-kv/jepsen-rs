@@ -112,9 +112,9 @@ pub enum ConsistencyModel {
 /// Checker trait
 pub trait Check {
     /// The check function, returns a map like `{:valid? true}`
-    fn check(
+    fn check<F: Serialize, ERR: Serialize>(
         &self,
-        history: SerializableHistoryList,
+        history: &SerializableHistoryList<F, ERR>,
         option: Option<CheckOption>,
     ) -> Result<SerializableCheckResult>;
 }
