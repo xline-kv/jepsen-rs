@@ -1,9 +1,8 @@
 pub mod elle_rw;
-use std::{default, path::PathBuf};
+use std::path::PathBuf;
 
 use anyhow::Result;
 use derive_builder::Builder;
-use j4rs::{errors::Result as jResult, Instance};
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
@@ -122,12 +121,11 @@ pub trait Check {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{init_jvm, nsinvoke, utils::print_clj, CLOJURE};
 
     #[test]
     fn test_deser_from_json_result() -> anyhow::Result<()> {
         let json = include_str!("../../assets/check_result.json");
-        let res: SerializableCheckResult = serde_json::from_str(json)?;
+        let _res: SerializableCheckResult = serde_json::from_str(json)?;
         Ok(())
     }
 }

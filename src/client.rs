@@ -42,23 +42,23 @@ impl ClusterClient for TestCluster {
 pub trait Client {
     type ERR: Send;
     /// alloc a new sender, and spawn a thread to receive ops.
-    async fn alloc_thread<C: Client + Send + Sync + 'static>(
+    async fn alloc_thread(
         &'static self,
-        global: Arc<Global<'static, C, Result<Op>, Self::ERR>>,
+        global: Arc<Global<'static, Result<Op>, Self::ERR>>,
         id: u64,
     );
     /// client received an op, send it to cluster and deal the result. The
     /// history (both invoke and result) will be recorded in this function.
-    async fn handle_op<C: Client + Send + Sync + 'static>(
+    async fn handle_op(
         &'static self,
-        global: &Arc<Global<'_, C, Result<Op>, Self::ERR>>,
+        global: &Arc<Global<'_, Result<Op>, Self::ERR>>,
         id: u64,
         op: Op,
     );
-    async fn start_test<C: Client + Send + Sync + 'static>(
+    async fn start_test(
         &'static self,
-        global: Arc<Global<'static, C, Result<Op>, Self::ERR>>,
-        gen: GeneratorGroup<'_, C, Result<Op>, Self::ERR>,
+        global: Arc<Global<'static, Result<Op>, Self::ERR>>,
+        gen: GeneratorGroup<'_, Result<Op>, Self::ERR>,
     ) -> Result<SerializableCheckResult, Self::ERR>;
 }
 
@@ -106,9 +106,9 @@ impl JepsenClient {
 
 impl Client for JepsenClient {
     type ERR = String;
-    async fn alloc_thread<C: Client + Send + Sync + 'static>(
+    async fn alloc_thread(
         &'static self,
-        global: Arc<Global<'static, C, Result<Op>, Self::ERR>>,
+        global: Arc<Global<'static, Result<Op>, Self::ERR>>,
         id: u64,
     ) {
         let mut lock = self
@@ -132,9 +132,9 @@ impl Client for JepsenClient {
         self.join_handles.lock().unwrap().push(x);
     }
 
-    async fn handle_op<C: Client + Send + Sync + 'static>(
+    async fn handle_op(
         &'static self,
-        global: &Arc<Global<'_, C, Result<Op>, Self::ERR>>,
+        global: &Arc<Global<'_, Result<Op>, Self::ERR>>,
         id: u64,
         op: Op,
     ) {
@@ -168,10 +168,10 @@ impl Client for JepsenClient {
     // will be held only by one thread, which could be safely held across await
     // point.
     #[allow(clippy::await_holding_lock)]
-    async fn start_test<C: Client + Send + Sync + 'static>(
+    async fn start_test(
         &'static self,
-        global: Arc<Global<'static, C, Result<Op>, Self::ERR>>,
-        mut gen: GeneratorGroup<'_, C, Result<Op>, Self::ERR>,
+        global: Arc<Global<'static, Result<Op>, Self::ERR>>,
+        mut gen: GeneratorGroup<'_, Result<Op>, Self::ERR>,
     ) -> Result<SerializableCheckResult, Self::ERR> {
         while let Some((op, id)) = gen.next_with_id().await {
             let op = op.map_err(|err| err.to_string())?;

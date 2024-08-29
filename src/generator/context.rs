@@ -1,14 +1,13 @@
 use std::{
-    collections::{BTreeMap, BTreeSet},
-    sync::{mpsc::Sender, Arc, Mutex},
+    collections::BTreeSet,
+    sync::{Arc, Mutex},
 };
 
 use anyhow::Result;
-use madsim::{runtime::NodeHandle, time};
+use madsim::time;
 
 use super::RawGenerator;
 use crate::{
-    client::Client,
     history::{ErrorType, SerializableHistoryList},
     op::{Op, OpFunctionType},
 };
@@ -76,7 +75,7 @@ impl Drop for GeneratorId {
 
 /// The global context
 #[non_exhaustive]
-pub struct Global<'a, C: Send + Client, T: Send = Result<Op>, ERR: Send = ErrorType> {
+pub struct Global<'a, T: Send = Result<Op>, ERR: Send = ErrorType> {
     /// The id allocator and handle pool.
     /// This is like a dispatcher, when an [`Op`] generated, it will be sent to
     /// the corresponding sender, aka a madsim thread. This thread will try
@@ -88,13 +87,11 @@ pub struct Global<'a, C: Send + Client, T: Send = Result<Op>, ERR: Send = ErrorT
     pub start_time: time::Instant,
     /// The history list
     pub history: Mutex<SerializableHistoryList<OpFunctionType, ERR>>,
-    /// The client
-    client: Arc<C>,
 }
 
-impl<'a, C: Send + Client, ERR: Send, T: Send + 'a> Global<'a, C, T, ERR> {
+impl<'a, T: Send + 'a, ERR: Send> Global<'a, T, ERR> {
     /// Create a new global context
-    pub fn new(gen: impl RawGenerator<Item = T> + Send + 'a, client: Arc<C>) -> Self {
+    pub fn new(gen: impl RawGenerator<Item = T> + Send + 'a) -> Self {
         let h: SerializableHistoryList<OpFunctionType, ERR> = Default::default();
         Self {
             id_set: Mutex::new(BTreeSet::new()).into(),
@@ -103,7 +100,6 @@ impl<'a, C: Send + Client, ERR: Send, T: Send + 'a> Global<'a, C, T, ERR> {
             )),
             start_time: time::Instant::now(),
             history: Mutex::new(h),
-            client,
         }
     }
 
