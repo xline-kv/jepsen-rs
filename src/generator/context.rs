@@ -3,7 +3,6 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use anyhow::Result;
 use madsim::time;
 
 use super::RawGenerator;
@@ -75,7 +74,7 @@ impl Drop for GeneratorId {
 
 /// The global context
 #[non_exhaustive]
-pub struct Global<'a, T: Send = Result<Op>, ERR: Send = ErrorType> {
+pub struct Global<'a, T: Send = Op, ERR: Send = ErrorType> {
     /// The id allocator and handle pool.
     /// This is like a dispatcher, when an [`Op`] generated, it will be sent to
     /// the corresponding sender, aka a madsim thread. This thread will try
@@ -109,11 +108,11 @@ impl<'a, T: Send + 'a, ERR: Send> Global<'a, T, ERR> {
     }
 
     /// Take the next `n` ops from the raw generator.
-    pub fn take_seq(&self, n: usize) -> Box<dyn Iterator<Item = T> + Send + 'a> {
+    pub fn take_seq(&self, n: usize) -> Vec<T> {
         if let Some(gen) = self.gen.lock().expect("Failed to lock gen").as_mut() {
-            Box::new(gen.gen_n(n).into_iter()) as Box<dyn Iterator<Item = T> + Send + 'a>
+            gen.gen_n(n)
         } else {
-            Box::new(std::iter::empty()) as Box<dyn Iterator<Item = T> + Send>
+            Vec::new()
         }
     }
 }

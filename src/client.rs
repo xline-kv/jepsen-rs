@@ -12,7 +12,7 @@ use tokio::task::JoinHandle;
 
 use crate::{
     checker::{elle_rw::ElleRwChecker, Check, CheckOption, SerializableCheckResult},
-    generator::{GeneratorGroup, Global, RawGenerator},
+    generator::{Generator, GeneratorGroup, Global, RawGenerator},
     history::HistoryType,
     op::Op,
     utils::AsyncIter,
@@ -20,43 +20,35 @@ use crate::{
 
 /// The interface of a cluster client, needs to be implemented by the external
 /// user.
-pub trait ClusterClient {
+pub trait ElleRwClusterClient {
     fn get(&self, key: u64) -> Option<u64>;
     fn put(&mut self, key: u64, value: u64);
 }
 
-struct TestCluster;
-impl TestCluster {
-    fn new() -> Self {
-        Self {}
-    }
-}
-impl ClusterClient for TestCluster {
-    fn get(&self, key: u64) -> Option<u64> {
-        None
-    }
-    fn put(&mut self, key: u64, value: u64) {}
-}
-
 /// The interface of a jepsen client.
 pub trait Client {
-    type ERR: Send;
-    /// alloc a new sender, and spawn a thread to receive ops.
+    type ERR: Send + 'static;
+    /// alloc a new sender if the id is new to client, and spawn a thread to
+    /// receive ops corresponding to the sender.
     async fn alloc_thread(&'static self, id: u64);
     /// client received an op, send it to cluster and deal the result. The
     /// history (both invoke and result) will be recorded in this function.
     async fn handle_op(&'static self, id: u64, op: Op);
-    async fn start_test(
+    async fn run(
         &'static self,
-        gen: GeneratorGroup<'_, Result<Op>, Self::ERR>,
+        gen: GeneratorGroup<'_, Op, Self::ERR>,
     ) -> Result<SerializableCheckResult, Self::ERR>;
+    fn new_generator(
+        &self,
+        n: usize,
+    ) -> impl std::future::Future<Output = Generator<'static, Op, Self::ERR>> + Send;
 }
 
 /// A client that leads the jepsen test, execute between the generator and the
 /// cluster.
-pub(crate) struct JepsenClient {
-    cluster_client: Mutex<Box<dyn ClusterClient + Send + Sync>>,
-    global: Arc<Global<'static, Result<Op>, <Self as Client>::ERR>>,
+pub struct JepsenClient {
+    cluster_client: Mutex<Box<dyn ElleRwClusterClient + Send + Sync>>,
+    pub global: Arc<Global<'static, Op, <Self as Client>::ERR>>,
     node_handle: NodeHandle,
     /// Get sender and join handle from generator id.
     sender_map: Mutex<BTreeMap<u64, Sender<Op>>>,
@@ -64,15 +56,31 @@ pub(crate) struct JepsenClient {
 }
 
 impl JepsenClient {
-    pub fn new(raw_gen: impl RawGenerator<Item = Result<Op>> + Send + 'static) -> Self {
+    pub fn new(
+        cluster: impl ElleRwClusterClient + Send + Sync + 'static,
+        raw_gen: impl RawGenerator<Item = Op> + Send + 'static,
+    ) -> Self {
+        Self::new_with_handle(
+            cluster,
+            raw_gen,
+            madsim::runtime::Handle::current().create_node().build(),
+        )
+    }
+
+    pub fn new_with_handle(
+        cluster: impl ElleRwClusterClient + Send + Sync + 'static,
+        raw_gen: impl RawGenerator<Item = Op> + Send + 'static,
+        node_handle: NodeHandle,
+    ) -> Self {
         Self {
-            cluster_client: Mutex::new(Box::new(TestCluster::new())),
+            cluster_client: Mutex::new(Box::new(cluster)),
             global: Arc::new(Global::new(raw_gen)),
-            node_handle: madsim::runtime::Handle::current().create_node().build(),
+            node_handle,
             sender_map: Mutex::new(BTreeMap::new()),
             join_handles: vec![].into(),
         }
     }
+
     pub fn drop_senders(&self) {
         self.sender_map.lock().unwrap().clear();
     }
@@ -120,6 +128,15 @@ impl Client for JepsenClient {
         self.join_handles.lock().unwrap().push(x);
     }
 
+    fn new_generator(
+        &self,
+        n: usize,
+    ) -> impl std::future::Future<Output = Generator<'static, Op, Self::ERR>> + Send {
+        let global = self.global.clone();
+        let seq = global.take_seq(n);
+        Generator::new(global, tokio_stream::iter(seq))
+    }
+
     async fn handle_op(&'static self, id: u64, op: Op) {
         self.global
             .history
@@ -153,12 +170,11 @@ impl Client for JepsenClient {
     // will be held only by one thread, which could be safely held across await
     // point.
     #[allow(clippy::await_holding_lock)]
-    async fn start_test(
+    async fn run(
         &'static self,
-        mut gen: GeneratorGroup<'_, Result<Op>, Self::ERR>,
+        mut gen: GeneratorGroup<'_, Op, Self::ERR>,
     ) -> Result<SerializableCheckResult, Self::ERR> {
         while let Some((op, id)) = gen.next_with_id().await {
-            let op = op.map_err(|err| err.to_string())?;
             self.alloc_thread(id).await;
             if let Some(sender) = self.sender_map.lock().unwrap().get_mut(&id) {
                 sender.send(op).unwrap();

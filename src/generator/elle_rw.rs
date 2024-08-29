@@ -32,13 +32,10 @@ impl ElleRwGenerator {
             })
         })
     }
-}
 
-impl RawGenerator for ElleRwGenerator {
-    type Item = anyhow::Result<Op>;
     /// It generates a batch of ops in one time, and reserves the gen `Instance`
     /// for next time to use.
-    fn gen(&mut self) -> anyhow::Result<Op> {
+    fn gen_inner(&mut self) -> anyhow::Result<Op> {
         init_jvm();
         if let Some(op) = self.cache.pop() {
             return Ok(op);
@@ -72,9 +69,16 @@ impl RawGenerator for ElleRwGenerator {
     }
 }
 
-impl Iterator for ElleRwGenerator {
-    type Item = anyhow::Result<Op>;
+impl RawGenerator for ElleRwGenerator {
+    type Item = Op;
+    fn gen(&mut self) -> Self::Item {
+        self.gen_inner()
+            .unwrap_or_else(|e| panic!("An error occurs from ElleRwGenerator generating: {}", e))
+    }
+}
 
+impl Iterator for ElleRwGenerator {
+    type Item = Op;
     fn next(&mut self) -> Option<Self::Item> {
         Some(self.gen())
     }
@@ -89,7 +93,7 @@ mod test {
     fn elle_gen_should_work() -> Result<(), Box<dyn std::error::Error>> {
         let mut gen = ElleRwGenerator::new()?;
         for _ in 0..GENERATOR_CACHE_SIZE * 2 + 10 {
-            gen.gen()?;
+            gen.gen();
         }
         Ok(())
     }

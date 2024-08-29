@@ -5,7 +5,6 @@ pub mod elle_rw;
 use std::ops::{AddAssign, RangeFrom};
 use std::{pin::Pin, sync::Arc};
 
-use anyhow::Result;
 use context::GeneratorId;
 pub use context::Global;
 use controller::{DelayStrategy, GeneratorGroupStrategy};
@@ -52,12 +51,14 @@ impl RawGenerator for RangeFrom<i32> {
 }
 
 /// The generator. It's a wrapper for the clojure seq and global context.
-pub struct Generator<'a, U: Send = Result<Op>, ERR: Send + 'a = ErrorType> {
+pub struct Generator<'a, U: Send = Op, ERR: Send + 'a = ErrorType> {
     /// generator id
     pub id: GeneratorId,
     /// A reference to the global context
     pub global: Arc<Global<'a, U, ERR>>,
-    /// The sequence (stream) of generator. Note that the seq is finite.
+    /// The sequence (stream) of generator. Note that the seq is finite, and
+    /// the `size_hint` must be it's actual size.
+    /// This size hint will be used to `delay_strategy`.
     pub seq: Pin<Box<dyn Stream<Item = U> + Send + 'a>>,
     /// The delay strategy between every `next()` function
     pub delay_strategy: DelayStrategy,
@@ -147,7 +148,7 @@ impl<'a, ERR: 'a + Send, U: Send + 'a> AsyncIter for Generator<'a, U, ERR> {
 
 /// A group of generators.
 #[derive(Default)]
-pub struct GeneratorGroup<'a, U: Send = Result<Op>, ERR: 'a + Send = ErrorType> {
+pub struct GeneratorGroup<'a, U: Send = Op, ERR: 'a + Send = ErrorType> {
     gens: Vec<Generator<'a, U, ERR>>,
     strategy: GeneratorGroupStrategy,
 }

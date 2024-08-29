@@ -1,4 +1,4 @@
-use std::{default, ops::Range, usize};
+use std::{ops::Range, usize};
 
 use madsim::{
     rand::{self, Rng},

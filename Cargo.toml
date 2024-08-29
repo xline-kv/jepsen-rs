@@ -8,7 +8,7 @@ version = "0.1.0"
 [dependencies]
 anyhow = "1.0.86"
 async-trait = "0.1.81"
-derive_builder = "0.20.0"
+derive_builder = "0.20.1"
 j4rs = "0.20.0"
 madsim = "0.2.27"
 serde = { version = "1.0.209", features = ["derive"] }
