@@ -74,7 +74,7 @@ impl Client for TestCluster {
             }
         }
     }
-    async fn new_handle(&self) -> madsim::runtime::NodeHandle {
+    async fn new_sender(&self) -> madsim::runtime::NodeHandle {
         madsim::runtime::Handle::current().create_node().build()
     }
     async fn start_test<'a, C: Client>(

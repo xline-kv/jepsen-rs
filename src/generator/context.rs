@@ -1,6 +1,6 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
-    sync::{Arc, Mutex},
+    sync::{mpsc::Sender, Arc, Mutex},
 };
 
 use anyhow::Result;
@@ -13,21 +13,21 @@ use crate::{
     op::Op,
 };
 
+type IdSetType = Arc<Mutex<BTreeSet<u64>>>;
+
 /// The id of the generator. Each [`GeneratorId`] corresponds to one thread.
-#[derive(Clone)]
-pub struct GeneratorId<C: Client> {
+#[derive(Clone, Debug)]
+pub struct GeneratorId {
     id: u64,
-    handle_pool: Arc<Mutex<BTreeMap<u64, NodeHandle>>>,
-    client: Arc<C>,
+    id_set: IdSetType,
 }
 
-impl<C: Client> GeneratorId<C> {
+impl GeneratorId {
     /// Create a new generator id
-    pub async fn new(id_set: Arc<Mutex<BTreeMap<u64, NodeHandle>>>, client: Arc<C>) -> Self {
+    pub async fn new(id_set: IdSetType) -> Self {
         Self {
-            id: Self::alloc_id(&id_set, &client).await,
-            handle_pool: id_set,
-            client,
+            id: Self::alloc_id(&id_set).await,
+            id_set,
         }
     }
 
@@ -37,9 +37,9 @@ impl<C: Client> GeneratorId<C> {
     }
 
     /// Find the minimal usable id in the thread pool
-    fn get_next_id(id_set: &Arc<Mutex<BTreeMap<u64, NodeHandle>>>) -> u64 {
+    fn get_next_id(id_set: &IdSetType) -> u64 {
         let pool = id_set.lock().expect("Failed to lock thread pool");
-        for (index, id) in pool.keys().enumerate() {
+        for (index, id) in pool.iter().enumerate() {
             if index as u64 != *id {
                 return index as u64;
             }
@@ -49,27 +49,25 @@ impl<C: Client> GeneratorId<C> {
 
     /// Allocate a new generator id, get a new [`NodeHandle`] from client and
     /// assoc with this id.
-    async fn alloc_id(id_set: &Arc<Mutex<BTreeMap<u64, NodeHandle>>>, client: &Arc<C>) -> u64 {
+    async fn alloc_id(id_set: &IdSetType) -> u64 {
         let id = Self::get_next_id(id_set);
-        let new_handle = client.new_handle().await;
         let res = id_set
             .lock()
             .expect("Failed to lock thread pool")
-            .insert(id, new_handle);
-        debug_assert!(res.is_none(), "insert must be success");
+            .insert(id);
+        debug_assert!(res, "insert must be success");
         id
     }
     /// Free the generator id and it's handle.
     fn free_id(&self, id: u64) -> bool {
-        self.handle_pool
+        self.id_set
             .lock()
             .expect("Failed to lock thread pool")
             .remove(&id)
-            .is_some()
     }
 }
 
-impl<C: Client> Drop for GeneratorId<C> {
+impl Drop for GeneratorId {
     fn drop(&mut self) {
         let res = self.free_id(self.id);
         debug_assert!(res, "free must be success");
@@ -78,9 +76,12 @@ impl<C: Client> Drop for GeneratorId<C> {
 
 /// The global context
 #[non_exhaustive]
-pub struct Global<'a, C: Client, ERR: Send = ErrorType, T: Send = Result<Op>> {
-    /// The id allocator and handle pool
-    pub handle_pool: Arc<Mutex<BTreeMap<u64, NodeHandle>>>,
+pub struct Global<'a, C: Send + Client, T: Send = Result<Op>, ERR: Send = ErrorType> {
+    /// The id allocator and handle pool.
+    /// This is like a dispatcher, when an [`Op`] generated, it will be sent to
+    /// the corresponding sender, aka a madsim thread. This thread will try
+    /// to receive the `Op` and execute it.
+    pub id_set: IdSetType,
     /// The original raw generator
     pub gen: Mutex<Option<Box<dyn RawGenerator<Item = T> + Send + 'a>>>,
     /// The start time of the simulation
@@ -91,12 +92,12 @@ pub struct Global<'a, C: Client, ERR: Send = ErrorType, T: Send = Result<Op>> {
     client: Arc<C>,
 }
 
-impl<'a, C: Client, ERR: Send, T: Send + 'a> Global<'a, C, ERR, T> {
+impl<'a, C: Send + Client, ERR: Send, T: Send + 'a> Global<'a, C, T, ERR> {
     /// Create a new global context
     pub fn new(gen: impl RawGenerator<Item = T> + Send + 'a, client: Arc<C>) -> Self {
         let h: SerializableHistoryList<ERR> = Default::default();
         Self {
-            handle_pool: Mutex::new(BTreeMap::new()).into(),
+            id_set: Mutex::new(BTreeSet::new()).into(),
             gen: Mutex::new(Some(
                 Box::new(gen) as Box<dyn RawGenerator<Item = T> + Send + 'a>
             )),
@@ -107,8 +108,8 @@ impl<'a, C: Client, ERR: Send, T: Send + 'a> Global<'a, C, ERR, T> {
     }
 
     /// Alloc a new generator id
-    pub async fn get_id(&self) -> GeneratorId<C> {
-        GeneratorId::new(Arc::clone(&self.handle_pool), Arc::clone(&self.client)).await
+    pub async fn get_id(&self) -> GeneratorId {
+        GeneratorId::new(Arc::clone(&self.id_set)).await
     }
 
     /// Take the next `n` ops from the raw generator.
@@ -119,16 +120,6 @@ impl<'a, C: Client, ERR: Send, T: Send + 'a> Global<'a, C, ERR, T> {
             Box::new(std::iter::empty()) as Box<dyn Iterator<Item = T> + Send>
         }
     }
-
-    /// Get the handle of the generator id.
-    pub fn use_handle<R>(&self, id: u64, f: impl FnOnce(&NodeHandle) -> R) -> R {
-        f(self
-            .handle_pool
-            .lock()
-            .expect("Failed to lock thread pool")
-            .get(&id)
-            .expect("handle not found"))
-    }
 }
 
 #[cfg(test)]
@@ -138,17 +129,16 @@ mod tests {
 
     #[madsim::test]
     async fn test_alloc_and_free_id() {
-        let id_set = Arc::new(Mutex::new(BTreeMap::new()));
-        let client = Arc::new(TestClient {});
-        let id0 = GeneratorId::new(id_set.clone(), client.clone()).await;
+        let id_set = Arc::new(Mutex::new(BTreeSet::new()));
+        let id0 = GeneratorId::new(id_set.clone()).await;
         assert_eq!(id0.get(), 0);
-        let id1 = GeneratorId::new(id_set.clone(), client.clone()).await;
+        let id1 = GeneratorId::new(id_set.clone()).await;
         assert_eq!(id1.get(), 1);
-        let id2 = GeneratorId::new(id_set.clone(), client.clone()).await;
+        let id2 = GeneratorId::new(id_set.clone()).await;
         assert_eq!(id2.get(), 2);
         drop(id1);
-        assert!(id_set.lock().unwrap().keys().cloned().collect::<Vec<u64>>() == vec![0, 2]);
-        let id1 = GeneratorId::new(id_set.clone(), client.clone()).await;
+        assert!(id_set.lock().unwrap().iter().cloned().collect::<Vec<u64>>() == vec![0, 2]);
+        let id1 = GeneratorId::new(id_set.clone()).await;
         assert_eq!(id1.get(), 1);
     }
 }
