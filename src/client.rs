@@ -12,7 +12,7 @@ use tokio::task::JoinHandle;
 
 use crate::{
     checker::{elle_rw::ElleRwChecker, Check, CheckOption, SerializableCheckResult},
-    generator::{GeneratorGroup, Global},
+    generator::{GeneratorGroup, Global, RawGenerator},
     history::HistoryType,
     op::Op,
     utils::AsyncIter,
@@ -42,22 +42,12 @@ impl ClusterClient for TestCluster {
 pub trait Client {
     type ERR: Send;
     /// alloc a new sender, and spawn a thread to receive ops.
-    async fn alloc_thread(
-        &'static self,
-        global: Arc<Global<'static, Result<Op>, Self::ERR>>,
-        id: u64,
-    );
+    async fn alloc_thread(&'static self, id: u64);
     /// client received an op, send it to cluster and deal the result. The
     /// history (both invoke and result) will be recorded in this function.
-    async fn handle_op(
-        &'static self,
-        global: &Arc<Global<'_, Result<Op>, Self::ERR>>,
-        id: u64,
-        op: Op,
-    );
+    async fn handle_op(&'static self, id: u64, op: Op);
     async fn start_test(
         &'static self,
-        global: Arc<Global<'static, Result<Op>, Self::ERR>>,
         gen: GeneratorGroup<'_, Result<Op>, Self::ERR>,
     ) -> Result<SerializableCheckResult, Self::ERR>;
 }
@@ -66,6 +56,7 @@ pub trait Client {
 /// cluster.
 pub(crate) struct JepsenClient {
     cluster_client: Mutex<Box<dyn ClusterClient + Send + Sync>>,
+    global: Arc<Global<'static, Result<Op>, <Self as Client>::ERR>>,
     node_handle: NodeHandle,
     /// Get sender and join handle from generator id.
     sender_map: Mutex<BTreeMap<u64, Sender<Op>>>,
@@ -73,9 +64,10 @@ pub(crate) struct JepsenClient {
 }
 
 impl JepsenClient {
-    pub fn new() -> Self {
+    pub fn new(raw_gen: impl RawGenerator<Item = Result<Op>> + Send + 'static) -> Self {
         Self {
             cluster_client: Mutex::new(Box::new(TestCluster::new())),
+            global: Arc::new(Global::new(raw_gen)),
             node_handle: madsim::runtime::Handle::current().create_node().build(),
             sender_map: Mutex::new(BTreeMap::new()),
             join_handles: vec![].into(),
@@ -106,11 +98,7 @@ impl JepsenClient {
 
 impl Client for JepsenClient {
     type ERR = String;
-    async fn alloc_thread(
-        &'static self,
-        global: Arc<Global<'static, Result<Op>, Self::ERR>>,
-        id: u64,
-    ) {
+    async fn alloc_thread(&'static self, id: u64) {
         let mut lock = self
             .sender_map
             .lock()
@@ -124,7 +112,7 @@ impl Client for JepsenClient {
         let (tx, rx) = mpsc::channel();
         let x = self.node_handle.spawn(async move {
             while let Ok(op) = rx.recv() {
-                self.handle_op(&global, id, op).await;
+                self.handle_op(id, op).await;
             }
         });
         let res = lock.insert(id, tx);
@@ -132,29 +120,26 @@ impl Client for JepsenClient {
         self.join_handles.lock().unwrap().push(x);
     }
 
-    async fn handle_op(
-        &'static self,
-        global: &Arc<Global<'_, Result<Op>, Self::ERR>>,
-        id: u64,
-        op: Op,
-    ) {
-        global
+    async fn handle_op(&'static self, id: u64, op: Op) {
+        self.global
             .history
             .lock()
             .unwrap()
-            .push_invoke(global, id, op.clone());
+            .push_invoke(&self.global, id, op.clone());
         let res = self.handle_op_inner(op.clone());
         match res {
             Ok(op) => {
-                global
-                    .history
-                    .lock()
-                    .unwrap()
-                    .push_result(global, id, HistoryType::Ok, op, None);
+                self.global.history.lock().unwrap().push_result(
+                    &self.global,
+                    id,
+                    HistoryType::Ok,
+                    op,
+                    None,
+                );
             }
             Err(err) => {
-                global.history.lock().unwrap().push_result(
-                    global,
+                self.global.history.lock().unwrap().push_result(
+                    &self.global,
                     id,
                     HistoryType::Fail,
                     op,
@@ -170,12 +155,11 @@ impl Client for JepsenClient {
     #[allow(clippy::await_holding_lock)]
     async fn start_test(
         &'static self,
-        global: Arc<Global<'static, Result<Op>, Self::ERR>>,
         mut gen: GeneratorGroup<'_, Result<Op>, Self::ERR>,
     ) -> Result<SerializableCheckResult, Self::ERR> {
         while let Some((op, id)) = gen.next_with_id().await {
             let op = op.map_err(|err| err.to_string())?;
-            self.alloc_thread(global.clone(), id).await;
+            self.alloc_thread(id).await;
             if let Some(sender) = self.sender_map.lock().unwrap().get_mut(&id) {
                 sender.send(op).unwrap();
             } else {
@@ -189,7 +173,7 @@ impl Client for JepsenClient {
         }
 
         let check_result = ElleRwChecker::default().check(
-            &global.history.lock().unwrap(),
+            &self.global.history.lock().unwrap(),
             Some(CheckOption::default()),
         );
         check_result.map_err(|err| err.to_string())
