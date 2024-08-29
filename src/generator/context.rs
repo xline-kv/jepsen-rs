@@ -22,9 +22,9 @@ pub struct GeneratorId {
 
 impl GeneratorId {
     /// Create a new generator id
-    pub async fn new(id_set: IdSetType) -> Self {
+    pub fn new(id_set: IdSetType) -> Self {
         Self {
-            id: Self::alloc_id(&id_set).await,
+            id: Self::alloc_id(&id_set),
             id_set,
         }
     }
@@ -47,7 +47,7 @@ impl GeneratorId {
 
     /// Allocate a new generator id, get a new [`NodeHandle`] from client and
     /// assoc with this id.
-    async fn alloc_id(id_set: &IdSetType) -> u64 {
+    fn alloc_id(id_set: &IdSetType) -> u64 {
         let id = Self::get_next_id(id_set);
         let res = id_set
             .lock()
@@ -103,8 +103,8 @@ impl<'a, T: Send + 'a, ERR: Send> Global<'a, T, ERR> {
     }
 
     /// Alloc a new generator id
-    pub async fn get_id(&self) -> GeneratorId {
-        GeneratorId::new(Arc::clone(&self.id_set)).await
+    pub fn get_id(&self) -> GeneratorId {
+        GeneratorId::new(Arc::clone(&self.id_set))
     }
 
     /// Take the next `n` ops from the raw generator.
@@ -121,18 +121,18 @@ impl<'a, T: Send + 'a, ERR: Send> Global<'a, T, ERR> {
 mod tests {
     use super::*;
 
-    #[madsim::test]
-    async fn test_alloc_and_free_id() {
+    #[test]
+    fn test_alloc_and_free_id() {
         let id_set = Arc::new(Mutex::new(BTreeSet::new()));
-        let id0 = GeneratorId::new(id_set.clone()).await;
+        let id0 = GeneratorId::new(id_set.clone());
         assert_eq!(id0.get(), 0);
-        let id1 = GeneratorId::new(id_set.clone()).await;
+        let id1 = GeneratorId::new(id_set.clone());
         assert_eq!(id1.get(), 1);
-        let id2 = GeneratorId::new(id_set.clone()).await;
+        let id2 = GeneratorId::new(id_set.clone());
         assert_eq!(id2.get(), 2);
         drop(id1);
         assert!(id_set.lock().unwrap().iter().cloned().collect::<Vec<u64>>() == vec![0, 2]);
-        let id1 = GeneratorId::new(id_set.clone()).await;
+        let id1 = GeneratorId::new(id_set.clone());
         assert_eq!(id1.get(), 1);
     }
 }

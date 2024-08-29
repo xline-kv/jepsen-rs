@@ -49,10 +49,9 @@ pub fn intergration_test() -> Result<()> {
         // get generators, transform and merge them
         let g1 = client
             .new_generator(100)
-            .await
             .filter(|o| matches!(o, Op::Txn(txn) if txn.len() == 1));
-        let g2 = client.new_generator(50).await;
-        let g3 = client.new_generator(50).await;
+        let g2 = client.new_generator(50);
+        let g3 = client.new_generator(50);
         info!("intergration_test: generators created");
         let gen_g = GeneratorGroup::new([g1, g2, g3])
             .with_strategy(GeneratorGroupStrategy::RoundRobin(usize::MAX));

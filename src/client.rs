@@ -39,10 +39,7 @@ pub trait Client {
         &'static self,
         gen: GeneratorGroup<'_, Op, Self::ERR>,
     ) -> Result<SerializableCheckResult, Self::ERR>;
-    fn new_generator(
-        &self,
-        n: usize,
-    ) -> impl std::future::Future<Output = Generator<'static, Op, Self::ERR>> + Send;
+    fn new_generator(&self, n: usize) -> Generator<'static, Op, Self::ERR>;
 }
 
 /// A client that leads the jepsen test, execute between the generator and the
@@ -132,10 +129,7 @@ impl Client for JepsenClient {
         info!("alloc a new thread for id {}", id);
     }
 
-    fn new_generator(
-        &self,
-        n: usize,
-    ) -> impl std::future::Future<Output = Generator<'static, Op, Self::ERR>> + Send {
+    fn new_generator(&self, n: usize) -> Generator<'static, Op, Self::ERR> {
         debug!("Jepsen client make new generator with {} ops", n);
         let global = self.global.clone();
         let seq = global.take_seq(n);
