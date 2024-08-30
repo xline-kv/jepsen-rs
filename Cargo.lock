@@ -546,6 +546,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "derive_builder",
+ "futures-util",
  "j4rs",
  "log",
  "madsim",
@@ -1336,3 +1337,8 @@ dependencies = [
  "quote",
  "syn 2.0.75",
 ]
+
+[[patch.unused]]
+name = "tokio-stream"
+version = "0.1.12"
+source = "git+https://github.com/madsim-rs/tokio.git?rev=ab251ad#ab251ad1fae8e16d9a1df74e301dbf3ed9d4d3af"

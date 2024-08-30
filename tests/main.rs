@@ -20,10 +20,10 @@ impl TestCluster {
 }
 
 impl ElleRwClusterClient for TestCluster {
-    fn get(&self, key: u64) -> Option<u64> {
+    async fn get(&self, key: u64) -> Option<u64> {
         self.db.get(&key).cloned()
     }
-    fn put(&mut self, key: u64, value: u64) {
+    async fn put(&mut self, key: u64, value: u64) {
         self.db.insert(key, value);
     }
 }
@@ -36,12 +36,12 @@ pub fn intergration_test() -> Result<()> {
         .filter_module("j4rs", LevelFilter::Info)
         .parse_default_env()
         .try_init();
-    let rt = madsim::runtime::Runtime::new();
-    let handle = rt.handle();
-    let node_handle = handle.create_node().build();
+    let mut rt = madsim::runtime::Runtime::new();
+    rt.set_allow_system_thread(true);
+
     let cluster = TestCluster::new();
     let raw_gen = ElleRwGenerator::new()?;
-    let client = JepsenClient::new_with_handle(cluster, raw_gen, node_handle);
+    let client = JepsenClient::new(cluster, raw_gen);
     let client = Box::leak(client.into());
     info!("intergration_test: client created");
 

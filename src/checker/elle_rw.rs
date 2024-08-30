@@ -1,10 +1,10 @@
 use j4rs::Instance;
+use log::trace;
 use serde::Serialize;
 
 use super::{CheckOption, SerializableCheckResult};
 use crate::{
-    history::SerializableHistoryList,
-    init_jvm, nsinvoke,
+    history::SerializableHistoryList, nsinvoke,
     utils::{historify, FromSerde, ToDe},
     with_jvm, CljNs, CLOJURE,
 };
@@ -30,15 +30,18 @@ impl super::Check for ElleRwChecker {
         history: &SerializableHistoryList<F, ERR>,
         options: Option<CheckOption>,
     ) -> anyhow::Result<SerializableCheckResult> {
-        init_jvm();
-        let h = historify(Instance::from_ser(history)?)?;
-        let res = if let Some(options) = options {
-            let op_clj = Instance::from_ser(options)?;
-            nsinvoke!(self.ns, "check", op_clj, h)?
-        } else {
-            nsinvoke!(self.ns, "check", h)?
-        };
-        res.to_de::<SerializableCheckResult>()
+        with_jvm(|_| {
+            let h = historify(Instance::from_ser(history)?)?;
+            trace!("historify done");
+            let res = if let Some(options) = options {
+                let op_clj = Instance::from_ser(options)?;
+                nsinvoke!(self.ns, "check", op_clj, h)?
+            } else {
+                nsinvoke!(self.ns, "check", h)?
+            };
+            trace!("check done");
+            res.to_de::<SerializableCheckResult>()
+        })
     }
 }
 

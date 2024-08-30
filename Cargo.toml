@@ -9,6 +9,7 @@ version = "0.1.0"
 anyhow = "1.0.86"
 async-trait = "0.1.81"
 derive_builder = "0.20.1"
+futures-util = "0.3.30"
 j4rs = "0.20.0"
 log = "0.4.22"
 madsim = "0.2.27"
@@ -16,6 +17,9 @@ serde = { version = "1.0.209", features = ["derive"] }
 serde_json = "1.0.127"
 tokio = { version = "0.2", package = "madsim-tokio" }
 tokio-stream = "0.1.15"
+
+[patch.crates-io]
+tokio-stream = { git = "https://github.com/madsim-rs/tokio.git", rev = "ab251ad" }
 
 [build-dependencies]
 j4rs = "0.20.0"
