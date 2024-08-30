@@ -8,7 +8,7 @@ use log::{debug, info, trace};
 
 use crate::{
     checker::{elle_rw::ElleRwChecker, Check, SerializableCheckResult},
-    generator::{Generator, GeneratorGroup, Global, RawGenerator},
+    generator::{Generator, GeneratorBuilder, GeneratorGroup, Global, RawGenerator},
     history::HistoryType,
     op::Op,
     utils::AsyncIter,
@@ -78,7 +78,9 @@ impl<EC: ElleRwClusterClient + Send + Sync + 'static> Client for JepsenClient<EC
         debug!("Jepsen client make new generator with {} ops", n);
         let global = self.global.clone();
         let seq = global.take_seq(n);
-        Generator::new(global, tokio_stream::iter(seq))
+        GeneratorBuilder::new(global)
+            .seq(tokio_stream::iter(seq))
+            .build()
     }
 
     async fn handle_op(&'static self, id: u64, op: Op) {
