@@ -2,7 +2,7 @@ pub mod elle_rw;
 use std::path::PathBuf;
 
 use anyhow::Result;
-use derive_builder::Builder;
+use default_struct_builder::DefaultBuilder;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
@@ -23,21 +23,26 @@ pub struct SerializableCheckResult {
     also_not: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Builder)]
+#[derive(Debug, Clone, Serialize, Deserialize, DefaultBuilder)]
 #[serde(rename_all = "kebab-case")]
 pub struct CheckOption {
-    consistency_models: ConsistencyModel,
+    #[builder(into)]
+    consistency_models: Option<ConsistencyModel>,
     #[serde(default = "default_out_dir")]
     directory: PathBuf,
-    anomalies: Vec<String>,
+    #[builder(into)]
+    anomalies: Option<Vec<String>>,
+    #[builder(into)]
+    analyzer: Option<String>,
 }
 
 impl Default for CheckOption {
     fn default() -> Self {
         Self {
-            consistency_models: ConsistencyModel::default(),
+            consistency_models: None,
             directory: default_out_dir(),
-            anomalies: vec![],
+            anomalies: None,
+            analyzer: None,
         }
     }
 }
@@ -114,7 +119,7 @@ pub trait Check {
     fn check<F: Serialize, ERR: Serialize>(
         &self,
         history: &SerializableHistoryList<F, ERR>,
-        option: Option<CheckOption>,
+        option: CheckOption,
     ) -> Result<SerializableCheckResult>;
 }
 

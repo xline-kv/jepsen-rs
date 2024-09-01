@@ -19,7 +19,7 @@ pub enum Op {
 }
 
 /// Op type of functions that being applied to db
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum OpFunctionType {
     #[serde(rename = "r")]

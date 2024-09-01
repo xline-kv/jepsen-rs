@@ -17,7 +17,7 @@ pub type ErrorType = Vec<String>;
 ///
 /// We only need to serialize the history, but here implements the Deserialize
 /// trait as well.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SerializableHistory<F = OpFunctionType, ERR = ErrorType> {
     pub index: u64,
     #[serde(rename = "type")]
@@ -44,7 +44,7 @@ pub struct SerializableHistoryList<F = OpFunctionType, ERR = ErrorType>(
     pub Vec<SerializableHistory<F, ERR>>,
 );
 
-impl<T, F> Default for SerializableHistoryList<T, F> {
+impl<F, ERR> Default for SerializableHistoryList<F, ERR> {
     fn default() -> Self {
         Self(vec![])
     }
@@ -59,6 +59,12 @@ impl Deref for SerializableHistoryList {
 impl DerefMut for SerializableHistoryList {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
+    }
+}
+
+impl<F: PartialEq, ERR: PartialEq> PartialEq for SerializableHistoryList<F, ERR> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
     }
 }
 
@@ -125,7 +131,9 @@ mod tests {
     fn test_history_list_conversion() -> anyhow::Result<()> {
         let his_edn = read_edn(include_str!("../assets/ex_history.edn"))?;
         let res: SerializableHistoryList = his_edn.to_de()?;
-        assert_eq!(res.len(), 4);
+        let res_json: SerializableHistoryList =
+            serde_json::from_str(include_str!("../assets/ex_history.json"))?;
+        assert_eq!(res, res_json);
         let res: Instance = Instance::from_ser(res)?;
         print_clj(res);
         Ok(())

@@ -7,7 +7,7 @@ use anyhow::Result;
 use log::{debug, info, trace};
 
 use crate::{
-    checker::{elle_rw::ElleRwChecker, Check, SerializableCheckResult},
+    checker::{elle_rw::ElleRwChecker, Check, CheckOption, SerializableCheckResult},
     generator::{Generator, GeneratorBuilder, GeneratorGroup, Global, RawGenerator},
     history::HistoryType,
     op::Op,
@@ -133,8 +133,8 @@ impl<EC: ElleRwClusterClient + Send + Sync + 'static> Client for JepsenClient<EC
         // let his = serde_json::to_string(&self.global.history.lock().unwrap().
         // deref()).unwrap(); std::fs::write("test.json", his);
 
-        let check_result =
-            ElleRwChecker::default().check(&self.global.history.lock().unwrap(), None);
+        let check_result = ElleRwChecker::default()
+            .check(&self.global.history.lock().unwrap(), CheckOption::default());
         check_result.map_err(|err| err.to_string())
     }
 }

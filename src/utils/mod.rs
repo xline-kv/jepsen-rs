@@ -33,3 +33,15 @@ impl OverflowingAddRange for usize {
         new
     }
 }
+
+#[cfg(test)]
+pub fn log_init() {
+    use log::LevelFilter;
+
+    _ = pretty_env_logger::formatted_builder()
+        .filter_level(log::LevelFilter::Debug)
+        .format_timestamp_millis()
+        .filter_module("j4rs", LevelFilter::Info)
+        .parse_default_env()
+        .try_init();
+}
