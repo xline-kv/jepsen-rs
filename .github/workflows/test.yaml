@@ -1,0 +1,24 @@
+name: Test
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: cargo test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: cargo-bins/cargo-binstall@main
+      - run: cargo binstall -y --no-symlinks cargo-nextest
+      - name: Setup sccache-cache
+        uses: mozilla-actions/sccache-action@v0.0.5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-java@v4
+        with:
+          distribution: "temurin" # See 'Supported distributions' for available options
+          java-version: "21"
+      - run: cargo nextest run && cargo test --doc
+        env:
+          RUSTFLAGS: "--cfg madsim"
