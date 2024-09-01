@@ -25,14 +25,18 @@ pub struct SerializableCheckResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, DefaultBuilder)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub struct CheckOption {
     #[builder(into)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     consistency_models: Option<ConsistencyModel>,
     #[serde(default = "default_out_dir")]
     directory: PathBuf,
     #[builder(into)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     anomalies: Option<Vec<String>>,
     #[builder(into)]
+    #[serde(skip_serializing_if = "Option::is_none")]
     analyzer: Option<String>,
 }
 
@@ -132,5 +136,17 @@ mod tests {
         let json = include_str!("../../assets/check_result.json");
         let _res: SerializableCheckResult = serde_json::from_str(json)?;
         Ok(())
+    }
+
+    #[test]
+    fn test_check_option_serialization() {
+        let option = CheckOption::default()
+            .analyzer("wr-graph")
+            .consistency_models(ConsistencyModel::CursorStability);
+        let json = serde_json::to_string(&option).unwrap();
+        assert_eq!(
+            r#"{"consistency-models":"cursor-stability","directory":"./out","analyzer":"wr-graph"}"#,
+            json
+        );
     }
 }
