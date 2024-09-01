@@ -56,7 +56,15 @@ impl<T> J4rsDie<T> for j4rs::errors::Result<T> {
 /// This fn is to extract the value of generated ops from elle generator.
 /// This function should be called before serialize the Instance.
 pub fn pre_serialize(i: Instance) -> jResult<Instance> {
-    cljinvoke!("map", cljeval!(#(:value %)), i)
+    with_jvm(|_| cljinvoke!("map", cljeval!(#(:value %)), i))
+}
+
+/// This function converts a clojure edn instance to jepsen history instance.
+pub fn historify(i: Instance) -> jResult<Instance> {
+    with_jvm(|_| {
+        let h = CLOJURE.require("jepsen.history")?;
+        nsinvoke!(h, "history", i)
+    })
 }
 
 /// Convert a clojure instance to json string

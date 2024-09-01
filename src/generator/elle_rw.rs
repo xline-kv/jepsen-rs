@@ -4,7 +4,7 @@ use j4rs::{Instance, InvocationArg};
 
 use super::{RawGenerator, GENERATOR_CACHE_SIZE};
 use crate::{
-    cljinvoke, nsinvoke,
+    cljinvoke, init_jvm, nsinvoke,
     op::{Op, Ops},
     utils::{pre_serialize, ToDe},
     with_jvm, CljNs, CLOJURE,
@@ -32,12 +32,11 @@ impl ElleRwGenerator {
             })
         })
     }
-}
 
-impl RawGenerator for ElleRwGenerator {
     /// It generates a batch of ops in one time, and reserves the gen `Instance`
     /// for next time to use.
-    fn get_op(&mut self) -> anyhow::Result<Op> {
+    fn gen_inner(&mut self) -> anyhow::Result<Op> {
+        init_jvm();
         if let Some(op) = self.cache.pop() {
             return Ok(op);
         }
@@ -70,25 +69,31 @@ impl RawGenerator for ElleRwGenerator {
     }
 }
 
-impl Iterator for ElleRwGenerator {
-    type Item = anyhow::Result<Op>;
+impl RawGenerator for ElleRwGenerator {
+    type Item = Op;
+    fn gen(&mut self) -> Self::Item {
+        self.gen_inner()
+            .unwrap_or_else(|e| panic!("An error occurs from ElleRwGenerator generating: {}", e))
+    }
+}
 
+impl Iterator for ElleRwGenerator {
+    type Item = Op;
     fn next(&mut self) -> Option<Self::Item> {
-        Some(self.get_op())
+        Some(self.gen())
     }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{generator::RawGenerator, init_jvm};
+    use crate::generator::RawGenerator;
 
     #[test]
     fn elle_gen_should_work() -> Result<(), Box<dyn std::error::Error>> {
-        init_jvm();
         let mut gen = ElleRwGenerator::new()?;
         for _ in 0..GENERATOR_CACHE_SIZE * 2 + 10 {
-            gen.get_op()?;
+            gen.gen();
         }
         Ok(())
     }
