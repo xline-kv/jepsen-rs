@@ -1,10 +1,10 @@
 //! NOTE: Requires java 21 due to https://github.com/jepsen-io/jepsen/issues/585
 
-mod checker;
-mod generator;
-mod history;
-mod jtests;
-mod op;
+pub mod checker;
+pub mod client;
+pub mod generator;
+pub mod history;
+pub mod op;
 pub mod utils;
 
 use std::{borrow::Borrow, cell::OnceCell};
@@ -131,8 +131,7 @@ impl Default for CljCore {
 
 #[cfg(test)]
 mod test {
-    use j4rs::JvmBuilder;
-    use utils::{pre_serialize, J4rsDie};
+    use utils::pre_serialize;
 
     use self::utils::print_clj;
     use super::*;
