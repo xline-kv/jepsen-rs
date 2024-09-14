@@ -1,4 +1,9 @@
+//! jepsen-rs is a binding to [jepsen](https://github.com/jepsen-io/jepsen),
+//! and more, a jepsen test suit for rust deterministic simulation testing.
+//!
 //! NOTE: Requires java 21 due to https://github.com/jepsen-io/jepsen/issues/585
+
+#![warn(clippy::cargo)]
 
 pub mod checker;
 pub mod client;

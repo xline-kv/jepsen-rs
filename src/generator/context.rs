@@ -13,7 +13,7 @@ use crate::{
 
 type IdSetType = Arc<Mutex<BTreeSet<u64>>>;
 
-/// The id allocator.
+/// The id allocator. Each thread will use different id.
 #[derive(Clone, Debug)]
 pub struct GeneratorId {
     id: u64,

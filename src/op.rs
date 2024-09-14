@@ -1,3 +1,6 @@
+//! This module defines operation that can be executed on a database, and
+//! provides the serialization / deserialization method of [`Op`] and [`Ops`].
+
 use std::{
     fmt,
     ops::{Deref, DerefMut},
@@ -10,7 +13,8 @@ use serde::{
 };
 use serde_json::{json, Value};
 
-/// An operation that can be executed on a database
+/// An operation that can be executed on a database. Generatored by jepsen
+/// Generator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Op {
     Read(u64, Option<u64>),
@@ -18,7 +22,8 @@ pub enum Op {
     Txn(Vec<Op>),
 }
 
-/// Op type of functions that being applied to db
+/// Op type of functions that being applied to db, for serialization and
+/// deserialization.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum OpFunctionType {

@@ -26,11 +26,11 @@ pub trait Client {
     type ERR: Send + 'static;
     /// client received an op, send it to cluster and deal the result. The
     /// history (both invoke and result) will be recorded in this function.
-    async fn handle_op(&'static self, id: u64, op: Op);
-    async fn run(
+    fn handle_op(&'static self, id: u64, op: Op) -> impl std::future::Future<Output = ()>;
+    fn run(
         &'static self,
         gen: GeneratorGroup<'_, Op, Self::ERR>,
-    ) -> Result<SerializableCheckResult, Self::ERR>;
+    ) -> impl std::future::Future<Output = Result<SerializableCheckResult, Self::ERR>>;
     fn new_generator(&self, n: usize) -> Generator<'static, Op, Self::ERR>;
 }
 

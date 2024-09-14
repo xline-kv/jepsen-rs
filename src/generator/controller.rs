@@ -1,4 +1,4 @@
-use std::{ops::Range, usize};
+use std::ops::Range;
 
 use madsim::{
     rand::{self, Rng},
@@ -16,7 +16,7 @@ pub enum DelayStrategy {
     None,
     /// Delay for a fixed time.
     Fixed(Duration),
-    /// Delay for a random time, and the time is between `0` and `2 * max`.
+    /// Delay for a random time, and the time is between `0` and `2 * Duration`.
     Random(Duration),
     // Exponential(u64),
 }

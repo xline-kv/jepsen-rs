@@ -17,6 +17,9 @@ pub type ErrorType = Vec<String>;
 ///
 /// We only need to serialize the history, but here implements the Deserialize
 /// trait as well.
+///
+/// FIXME: The deserialization in clojure site will ignore the `:` symbol, that
+/// causes the unknown check result in checker.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SerializableHistory<F = OpFunctionType, ERR = ErrorType> {
     pub index: u64,
@@ -138,4 +141,7 @@ mod tests {
         print_clj(res);
         Ok(())
     }
+
+    // TODO: add test for the deserialization in clojure after fixing the
+    // problem in the doc of [`SerializableHistory`].
 }

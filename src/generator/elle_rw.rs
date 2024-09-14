@@ -10,6 +10,8 @@ use crate::{
     with_jvm, CljNs, CLOJURE,
 };
 
+/// The generator of `elle.rw-register`. This generator will only generates a
+/// batch of txns which contains read and write operations.
 pub struct ElleRwGenerator {
     /// The namespace of the generator, default is `elle.rw-register`
     ns: CljNs,

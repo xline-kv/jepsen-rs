@@ -2,7 +2,7 @@ use std::pin::Pin;
 
 use tokio_stream::{Stream, StreamExt};
 
-/// The extra methods on iterators.
+/// The extra methods on async iterators (Stream).
 pub trait ExtraStreamExt: Stream {
     /// Splits the iterator at `n`, returns the splited iterators.
     fn split_at(

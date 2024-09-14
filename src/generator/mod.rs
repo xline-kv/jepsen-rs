@@ -52,6 +52,7 @@ impl RawGenerator for RangeFrom<i32> {
     }
 }
 
+/// The builder of generator.
 pub struct GeneratorBuilder<'a, U: Send + fmt::Debug = Op, ERR: Send + 'a = ErrorType> {
     global: Arc<Global<'a, U, ERR>>,
     seq: Option<Pin<Box<dyn Stream<Item = U> + Send + 'a>>>,
@@ -92,12 +93,19 @@ impl<'a, U: Send + fmt::Debug + 'a, ERR: 'a + Send> GeneratorBuilder<'a, U, ERR>
         self.seq = Some(seq);
         self
     }
+
+    /// use a given [`DelayStrategy`] for all times.
+    ///
+    /// note that the function must be called after `seq` or `pinned_seq`.
     #[inline]
-    /// `delay_strategy` must be called after `seq` or `pinned_seq`.
     pub fn delay(mut self, delay_strategy: DelayStrategy) -> Self {
         self.delay_strategy_one = Some(delay_strategy);
         self
     }
+
+    /// delays for a given sequence of [`DelayStrategy`]s
+    ///
+    /// note that the function must be called after `seq` or `pinned_seq`.
     #[inline]
     pub fn delay_stream(
         self,
@@ -106,6 +114,9 @@ impl<'a, U: Send + fmt::Debug + 'a, ERR: 'a + Send> GeneratorBuilder<'a, U, ERR>
         self.pinned_delay_stream(Box::pin(delay_strategy))
     }
 
+    /// delays for a given pinned sequence of [`DelayStrategy`]s
+    ///
+    /// note that the function must be called after `seq` or `pinned_seq`.
     #[inline]
     pub fn pinned_delay_stream(
         mut self,
@@ -147,7 +158,10 @@ impl<'a, U: Send + fmt::Debug + 'a, ERR: 'a + Send> GeneratorBuilder<'a, U, ERR>
     }
 }
 
-/// The generator. It's a wrapper for the clojure seq and global context.
+/// The generator. Each generator is a **FINITE** Op sequence with a same size
+/// sequence of [`DelayStrategy`]s. When generating each Op, the generator will
+/// take an element from both the sequence and the [`DelayStrategy`] sequence,
+/// returns the [`Op`] after delay for the corresponding [`DelayStrategy`].
 pub struct Generator<'a, U: Send + fmt::Debug = Op, ERR: Send + 'a = ErrorType> {
     /// generator id
     pub id: GeneratorId,
@@ -193,6 +207,12 @@ impl<'a, U: Send + fmt::Debug + 'a, ERR: 'a + Send> Generator<'a, U, ERR> {
             .build()
     }
 
+    /// Split the [`Generator`] into two generators, the first generator will
+    /// take the first `n` elements from the seq and the second generator
+    /// will keep the rest.
+    ///
+    /// First generator will keep the generator id, and the second [`Generator`]
+    /// will alloc a new id.
     pub async fn split_at(mut self, n: usize) -> (Self, Self) {
         let first_seq = self.seq.as_mut().split_at(n).await;
         let first_delay = self.delay_strategy.as_mut().split_at(n).await;
@@ -210,6 +230,7 @@ impl<'a, U: Send + fmt::Debug + 'a, ERR: 'a + Send> Generator<'a, U, ERR> {
         )
     }
 
+    /// Chain two generators together.
     pub fn chain(self, other: Self) -> Self {
         let out_seq = self.seq.chain(other.seq);
         let out_delay = self.delay_strategy.chain(other.delay_strategy);
@@ -357,6 +378,19 @@ mod tests {
         let mut out = gen.gen_n(10);
         out.sort();
         assert_eq!(out, vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    }
+
+    #[madsim::test]
+    async fn chain_generator_will_free_the_id() {
+        let global = Arc::new(Global::<_, String>::new(1..));
+        let gen = GeneratorBuilder::new(Arc::clone(&global))
+            .seq(tokio_stream::iter(global.take_seq(10)))
+            .build();
+        let (g0, g1) = gen.split_at(5).await;
+        assert_eq!(g0.id.get(), 0);
+        assert_eq!(g1.id.get(), 1);
+        let g2 = g0.chain(g1);
+        assert_eq!(g2.id.get(), 0);
     }
 
     #[madsim::test]
