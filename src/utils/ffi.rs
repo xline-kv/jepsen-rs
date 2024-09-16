@@ -2,7 +2,7 @@ use anyhow::Result;
 use j4rs::{errors::Result as jResult, Instance, InvocationArg};
 use serde::Serialize;
 
-use crate::{cljeval, cljinvoke, nsinvoke, with_jvm, CLOJURE};
+use crate::{cljinvoke, nsinvoke, with_jvm, CLOJURE};
 
 /// print a java instance
 pub fn print(inst: Instance) {
@@ -56,7 +56,9 @@ impl<T> J4rsDie<T> for j4rs::errors::Result<T> {
 /// This fn is to extract the value of generated ops from elle generator.
 /// This function should be called before serialize the Instance.
 pub fn pre_serialize(i: Instance) -> jResult<Instance> {
-    with_jvm(|_| cljinvoke!("map", cljeval!(#(:value %)), i))
+    // In rust 1.74, we cannot use `cljeval!(#(:value %))` here, otherwise
+    // the jvm will panic with Invalid token: `:`
+    with_jvm(|_| cljinvoke!("map", cljinvoke!("load-string", "#(:value %)"), i))
 }
 
 /// This function converts a clojure edn instance to jepsen history instance.
@@ -115,7 +117,7 @@ mod tests {
     use serde::Deserialize;
 
     use super::*;
-    use crate::init_jvm;
+    use crate::{cljeval, init_jvm};
 
     #[test]
     fn test_convertion_between_clojure_and_rust() {

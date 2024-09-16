@@ -243,6 +243,7 @@ impl<'a, U: Send + fmt::Debug + 'a, ERR: 'a + Send> Generator<'a, U, ERR> {
     }
 }
 
+#[async_trait::async_trait]
 impl<'a, ERR: 'a + Send, U: Send + fmt::Debug + 'a> AsyncIter for Generator<'a, U, ERR> {
     type Item = U;
     async fn next(&mut self) -> Option<Self::Item> {
@@ -303,38 +304,55 @@ impl<'a, ERR: 'a + Send, U: Send + fmt::Debug + 'a> GeneratorGroup<'a, U, ERR> {
     }
 }
 
-macro_rules! impl_async_iter_for_generator_group {
-    ($func: ident, $return_type: ty) => {
-        /// Select one generator to generate `Op` by group strategy. If it's empty,
-        /// drop it and try to use another. If all [`Generator`]s in the group
-        /// are empty, returns None.
-        async fn $func(&mut self) -> $return_type {
-            loop {
-                if self.gens.is_empty() {
-                    return None;
-                }
-                let selected = self.strategy.choose(0..self.gens.len());
-                match self
-                    .gens
-                    .get_mut(selected)
-                    .expect("selected index should be in the vec")
-                    .$func()
-                    .await
-                {
-                    x @ Some(_) => return x,
-                    None => {
-                        self.remove_generator(selected);
-                    }
+#[async_trait::async_trait]
+impl<'a, U: Send + fmt::Debug + 'a, ERR: 'a + Send> AsyncIter for GeneratorGroup<'a, U, ERR> {
+    type Item = U;
+    /// Select one generator to generate `Op` by group strategy. If it's empty,
+    /// drop it and try to use another. If all [`Generator`]s in the group
+    /// are empty, returns None.
+    async fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if self.gens.is_empty() {
+                return None;
+            }
+            let selected = self.strategy.choose(0..self.gens.len());
+            match self
+                .gens
+                .get_mut(selected)
+                .expect("selected index should be in the vec")
+                .next()
+                .await
+            {
+                x @ Some(_) => return x,
+                None => {
+                    self.remove_generator(selected);
                 }
             }
         }
-    };
-}
-
-impl<'a, U: Send + fmt::Debug + 'a, ERR: 'a + Send> AsyncIter for GeneratorGroup<'a, U, ERR> {
-    type Item = U;
-    impl_async_iter_for_generator_group!(next, Option<Self::Item>);
-    impl_async_iter_for_generator_group!(next_with_id, Option<(Self::Item, u64)>);
+    }
+    /// Select one generator to generate `Op` by group strategy. If it's empty,
+    /// drop it and try to use another. If all [`Generator`]s in the group
+    /// are empty, returns None.
+    async fn next_with_id(&mut self) -> Option<(Self::Item, u64)> {
+        loop {
+            if self.gens.is_empty() {
+                return None;
+            }
+            let selected = self.strategy.choose(0..self.gens.len());
+            match self
+                .gens
+                .get_mut(selected)
+                .expect("selected index should be in the vec")
+                .next_with_id()
+                .await
+            {
+                x @ Some(_) => return x,
+                None => {
+                    self.remove_generator(selected);
+                }
+            }
+        }
+    }
 }
 
 /// Convert a [`Generator`] to a [`GeneratorGroup`].

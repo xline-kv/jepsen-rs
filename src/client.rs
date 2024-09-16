@@ -1,7 +1,4 @@
-use std::{
-    future::Future,
-    sync::{Arc, Mutex},
-};
+use std::sync::Arc;
 
 use anyhow::Result;
 use log::{debug, info, trace};
@@ -16,49 +13,52 @@ use crate::{
 
 /// The interface of a cluster client, needs to be implemented by the external
 /// user.
+#[async_trait::async_trait]
 pub trait ElleRwClusterClient {
-    fn get(&self, key: u64) -> impl Future<Output = Option<u64>> + Send;
-    fn put(&mut self, key: u64, value: u64) -> impl Future<Output = ()> + Send;
+    async fn get(&self, key: u64) -> std::result::Result<Option<u64>, String>;
+    async fn put(&self, key: u64, value: u64) -> std::result::Result<(), String>;
 }
 
 /// The interface of a jepsen client.
+#[async_trait::async_trait]
 pub trait Client {
     type ERR: Send + 'static;
     /// client received an op, send it to cluster and deal the result. The
     /// history (both invoke and result) will be recorded in this function.
-    fn handle_op(&'static self, id: u64, op: Op) -> impl std::future::Future<Output = ()>;
-    fn run(
+    async fn handle_op(&'static self, id: u64, op: Op);
+    async fn run(
         &'static self,
         gen: GeneratorGroup<'_, Op, Self::ERR>,
-    ) -> impl std::future::Future<Output = Result<SerializableCheckResult, Self::ERR>>;
+    ) -> Result<SerializableCheckResult, Self::ERR>;
     fn new_generator(&self, n: usize) -> Generator<'static, Op, Self::ERR>;
 }
 
 /// A client that leads the jepsen test, execute between the generator and the
 /// cluster.
 pub struct JepsenClient<EC: ElleRwClusterClient + Send + Sync + 'static> {
-    cluster_client: Mutex<EC>,
+    cluster_client: EC,
     pub global: Arc<Global<'static, Op, <Self as Client>::ERR>>,
 }
 
 impl<EC: ElleRwClusterClient + Send + Sync + 'static> JepsenClient<EC> {
     pub fn new(cluster: EC, raw_gen: impl RawGenerator<Item = Op> + Send + 'static) -> Self {
         Self {
-            cluster_client: Mutex::new(cluster),
+            cluster_client: cluster,
             global: Arc::new(Global::new(raw_gen)),
         }
     }
 
     /// Recursively handle an op, return the result.
     #[allow(clippy::await_holding_lock)]
-    pub async fn handle_op_inner(&self, op: Op) -> Result<Op, String> {
+    #[async_recursion::async_recursion]
+    pub async fn handle_op_inner(&self, op: Op) -> std::result::Result<Op, String> {
         match op {
             Op::Read(key, _) => {
-                let value = self.cluster_client.lock().unwrap().get(key).await;
+                let value = self.cluster_client.get(key).await?;
                 Ok(Op::Read(key, value))
             }
             Op::Write(key, value) => {
-                self.cluster_client.lock().unwrap().put(key, value).await;
+                self.cluster_client.put(key, value).await?;
                 Ok(Op::Write(key, value))
             }
             Op::Txn(ops) => Ok(Op::Txn(
@@ -71,6 +71,7 @@ impl<EC: ElleRwClusterClient + Send + Sync + 'static> JepsenClient<EC> {
     }
 }
 
+#[async_trait::async_trait]
 impl<EC: ElleRwClusterClient + Send + Sync + 'static> Client for JepsenClient<EC> {
     type ERR = String;
 

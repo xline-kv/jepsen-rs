@@ -119,6 +119,7 @@ pub static CLOJURE: CljCore = CljCore { ns: "clojure.core" };
 
 impl CljCore {
     pub fn require(&self, ns: &str) -> j4rs::errors::Result<CljNs> {
+        init_jvm();
         CljNs::var_inner(self.ns, "require")?.invoke1(cljinvoke_java_api!("read", ns)?)?;
         Ok(CljNs { ns: ns.to_string() })
     }

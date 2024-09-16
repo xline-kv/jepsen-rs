@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Mutex};
 
 use anyhow::Result;
 use jepsen_rs::{
@@ -8,23 +8,27 @@ use jepsen_rs::{
 };
 use log::{info, LevelFilter};
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Default)]
 pub struct TestCluster {
-    db: HashMap<u64, u64>,
+    db: Mutex<HashMap<u64, u64>>,
 }
 
 impl TestCluster {
     pub fn new() -> Self {
-        Self { db: HashMap::new() }
+        Self {
+            db: HashMap::new().into(),
+        }
     }
 }
 
+#[async_trait::async_trait]
 impl ElleRwClusterClient for TestCluster {
-    async fn get(&self, key: u64) -> Option<u64> {
-        self.db.get(&key).cloned()
+    async fn get(&self, key: u64) -> Result<Option<u64>, String> {
+        Ok(self.db.lock().unwrap().get(&key).cloned())
     }
-    async fn put(&mut self, key: u64, value: u64) {
-        self.db.insert(key, value);
+    async fn put(&self, key: u64, value: u64) -> Result<(), String> {
+        self.db.lock().unwrap().insert(key, value);
+        Ok(())
     }
 }
 
