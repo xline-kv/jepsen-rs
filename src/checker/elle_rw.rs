@@ -4,10 +4,9 @@ use serde::Serialize;
 
 use super::{CheckOption, SerializableCheckResult};
 use crate::{
+    ffi::{historify, FromSerde, ToDe},
     history::SerializableHistoryList,
-    nsinvoke,
-    utils::{historify, FromSerde, ToDe},
-    with_jvm, CljNs, CLOJURE,
+    nsinvoke, with_jvm, CljNs, CLOJURE,
 };
 
 pub struct ElleRwChecker {

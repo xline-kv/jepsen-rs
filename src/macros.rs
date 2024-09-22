@@ -1,18 +1,6 @@
 //! This module provides some macros to help you invoke clojure functions and
 //! deal with clojure instances.
 
-/// Reads edn format data
-///
-/// # Returns
-///
-/// A clojure Instance of that data.
-#[macro_export]
-macro_rules! cljread {
-    ($($char:tt)*) => {
-        cljinvoke_java_api!("read", stringify!($($char)*)).unwrap()
-    };
-}
-
 /// Invoke a clojure function.
 /// ```
 /// use j4rs::{JvmBuilder, Instance, InvocationArg};
@@ -35,6 +23,20 @@ macro_rules! cljinvoke {
 /// Evaluate the Clojure raw string
 /// ```
 /// use j4rs::{JvmBuilder, Instance, InvocationArg};
+/// use jepsen_rs::{cljinvoke, cljevalstr, CljCore};
+/// let _jvm = JvmBuilder::new().build();
+/// cljevalstr!("(println \"hello\")").unwrap();
+/// ```
+#[macro_export]
+macro_rules! cljevalstr {
+    ($s:expr) => {
+        $crate::cljinvoke!("load-string", $s)
+    };
+}
+
+/// Evaluate the Clojure raw string
+/// ```
+/// use j4rs::{JvmBuilder, Instance, InvocationArg};
 /// use jepsen_rs::{cljinvoke, cljeval, CljCore};
 /// let _jvm = JvmBuilder::new().build();
 /// cljeval!((println "hello")).unwrap();
@@ -42,13 +44,14 @@ macro_rules! cljinvoke {
 #[macro_export]
 macro_rules! cljeval {
     ($($char:tt)*) => {
-        $crate::cljinvoke!("load-string", stringify!($($char)*))
+        $crate::cljevalstr!(stringify!($($char)*))
     };
 }
 
 /// Invoke a clojure from clojure.java.api.Clojure
 ///
 /// https://clojure.github.io/clojure/javadoc/clojure/java/api/Clojure.html
+#[macro_export]
 macro_rules! cljinvoke_java_api {
     ($name:expr) => {
         $crate::invoke_clojure_java_api($name, &[])

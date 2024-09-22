@@ -126,17 +126,21 @@ mod tests {
 
     use super::*;
     use crate::{
-        read_edn,
-        utils::{print_clj, FromSerde, ToDe},
+        cljevalstr,
+        ffi::{print_clj, read_edn, register::NS_REGISTER, FromSerde, ToDe},
+        init_jvm, nsinvoke, CLOJURE,
     };
 
     #[test]
     fn test_history_list_conversion() -> anyhow::Result<()> {
         let his_edn = read_edn(include_str!("../assets/ex_history.edn"))?;
         let res: SerializableHistoryList = his_edn.to_de()?;
+
+        // additional test for serialization and deserialization
         let res_json: SerializableHistoryList =
             serde_json::from_str(include_str!("../assets/ex_history.json"))?;
         assert_eq!(res, res_json);
+
         let res: Instance = Instance::from_ser(res)?;
         print_clj(res);
         Ok(())
@@ -144,4 +148,13 @@ mod tests {
 
     // TODO: add test for the deserialization in clojure after fixing the
     // problem in the doc of [`SerializableHistory`].
+    #[test]
+    fn mytest() -> anyhow::Result<()> {
+        init_jvm();
+        let x = r#"{:type :invoke, :f :txn, :value [[:w 2 1]], :time 3291485317, :process 0, :index 0}"#;
+        let ns = NS_REGISTER.get_or_register("serde");
+        let res = nsinvoke!(ns, "custom-serialize", read_edn(x))?;
+        print_clj(res);
+        Ok(())
+    }
 }

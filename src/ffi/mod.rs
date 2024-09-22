@@ -1,3 +1,5 @@
+pub mod register;
+
 use anyhow::Result;
 use j4rs::{errors::Result as jResult, Instance, InvocationArg};
 use serde::Serialize;
@@ -53,6 +55,41 @@ impl<T> J4rsDie<T> for j4rs::errors::Result<T> {
     }
 }
 
+/// Invoke a method of `java.util.Objects`
+fn object_method(insts: Vec<Instance>, method_name: &str) -> jResult<Instance> {
+    with_jvm(|jvm| -> jResult<_> {
+        let object_class = jvm.static_class("java.util.Objects")?;
+        jvm.invoke(
+            &object_class,
+            method_name,
+            insts
+                .into_iter()
+                .map(&InvocationArg::from)
+                .collect::<Vec<_>>()
+                .as_slice(),
+        )
+    })
+}
+
+/// Check if two instances are equals
+pub fn equals(a: Instance, b: Instance) -> jResult<bool> {
+    with_jvm(|jvm| -> jResult<_> { jvm.to_rust(object_method(vec![a, b], "equals")?) })
+}
+
+/// Load an edn format data as clojure instance
+///
+/// ```
+/// use j4rs::{JvmBuilder, Instance, InvocationArg};
+/// use jepsen_rs::{CljCore, cljeval};
+/// use jepsen_rs::utils::ffi::{equals, read_edn};
+/// let _jvm = JvmBuilder::new().build();
+/// let res = read_edn("(assoc {:a 1} :b \"hello\")").unwrap();
+/// assert!(equals(res, cljeval!({:a 1, :b "hello"}).unwrap()).unwrap());
+/// ```
+pub fn read_edn(arg: &str) -> j4rs::errors::Result<Instance> {
+    with_jvm(|_| cljinvoke!("load-string", arg))
+}
+
 /// This fn is to extract the value of generated ops from elle generator.
 /// This function should be called before serialize the Instance.
 pub fn pre_serialize(i: Instance) -> jResult<Instance> {
@@ -72,16 +109,16 @@ pub fn historify(i: Instance) -> jResult<Instance> {
 /// Convert a clojure instance to json string
 pub fn clj_jsonify(inst: Instance) -> jResult<String> {
     with_jvm(|_| {
-        let json = CLOJURE.require("clojure.data.json")?;
-        java_to_string(&nsinvoke!(json, "write-str", inst)?)
+        let json = CLOJURE.require("cheshire.core")?;
+        java_to_string(&nsinvoke!(json, "generate-string", inst)?)
     })
 }
 
 /// Convert a json string to clojure instance
 pub fn clj_from_json(s: &str) -> jResult<Instance> {
     with_jvm(|_| {
-        let json = CLOJURE.require("clojure.data.json")?;
-        nsinvoke!(json, "read-str", s)
+        let json = CLOJURE.require("cheshire.core")?;
+        nsinvoke!(json, "parse-string", s)
     })
 }
 
@@ -144,5 +181,25 @@ mod tests {
         };
         let res: Instance = Instance::from_ser(&s).unwrap();
         print_clj(res);
+    }
+
+    #[test]
+    fn test_equals() {
+        init_jvm();
+        let a = cljeval!((assoc {:a 1} :b "hello")).unwrap();
+        let b = cljeval!((assoc {:a 1} :b "hello")).unwrap();
+        assert!(equals(a, b).unwrap());
+    }
+
+    #[test]
+    fn json_serde_should_be_consistent() {
+        init_jvm();
+        let edn_str = r#"{:type :invoke, :f :txn, :value [[:w 2 1]], :time 3291485317, :process 0, :index 0}"#;
+        let clj_obj = read_edn(edn_str).die();
+        let json_str = clj_jsonify(clj_obj).die();
+        println!("{}", json_str);
+        let clj_obj2 = clj_from_json(&json_str).die();
+        let res = clj_to_string(clj_obj2).die();
+        assert_eq!(edn_str, res);
     }
 }

@@ -4,9 +4,10 @@ use j4rs::{Instance, InvocationArg};
 
 use super::{RawGenerator, GENERATOR_CACHE_SIZE};
 use crate::{
-    cljinvoke, init_jvm, nsinvoke,
+    cljinvoke,
+    ffi::{pre_serialize, ToDe},
+    init_jvm, nsinvoke,
     op::{Op, Ops},
-    utils::{pre_serialize, ToDe},
     with_jvm, CljNs, CLOJURE,
 };
 

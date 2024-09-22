@@ -7,15 +7,15 @@
 
 pub mod checker;
 pub mod client;
+pub mod ffi;
 pub mod generator;
 pub mod history;
 pub mod op;
 pub mod utils;
-
-use std::{borrow::Borrow, cell::OnceCell};
-
 #[macro_use]
 pub mod macros;
+
+use std::{borrow::Borrow, cell::OnceCell};
 
 use j4rs::{Instance, InvocationArg, Jvm, JvmBuilder};
 
@@ -43,10 +43,6 @@ where
         });
         f(jvm)
     })
-}
-
-pub fn read_edn(arg: &str) -> j4rs::errors::Result<Instance> {
-    with_jvm(|_| cljinvoke!("load-string", arg))
 }
 
 fn invoke_clojure_java_api(
@@ -137,11 +133,9 @@ impl Default for CljCore {
 
 #[cfg(test)]
 mod test {
-    use utils::pre_serialize;
+    use ffi::{pre_serialize, print_clj, read_edn};
 
-    use self::utils::print_clj;
     use super::*;
-    use crate::utils::print;
 
     #[test]
     fn test_elle_check() -> Result<(), Box<dyn std::error::Error>> {
@@ -174,7 +168,7 @@ mod test {
         let gen = r.var("gen")?.invoke0()?;
         let history = cljinvoke!("take", 10, gen)?;
         let res = nsinvoke!(r, "check", nsinvoke!(h, "history", history)?)?;
-        print(res);
+        print_clj(res);
         Ok(())
     }
 

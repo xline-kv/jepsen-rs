@@ -1,8 +1,6 @@
-pub mod ffi;
 pub mod iter;
 use std::ops::Range;
 
-pub use ffi::*;
 pub use iter::*;
 
 pub trait OverflowingAddRange {

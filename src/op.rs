@@ -150,7 +150,7 @@ mod test {
     use j4rs::Instance;
 
     use super::*;
-    use crate::utils::{FromSerde, ToDe};
+    use crate::ffi::{FromSerde, ToDe};
 
     #[test]
     fn test_op_serde() {
