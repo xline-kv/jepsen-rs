@@ -2,6 +2,7 @@ pub mod register;
 
 use anyhow::Result;
 use j4rs::{errors::Result as jResult, Instance, InvocationArg};
+use register::NS_REGISTER;
 use serde::Serialize;
 
 use crate::{cljinvoke, nsinvoke, with_jvm, CLOJURE};
@@ -71,9 +72,16 @@ fn object_method(insts: Vec<Instance>, method_name: &str) -> jResult<Instance> {
     })
 }
 
-/// Check if two instances are equals
-pub fn equals(a: Instance, b: Instance) -> jResult<bool> {
+/// Check if two java instances are equals
+///
+/// WARN: two clojure instances may be not equals in java.
+pub fn equals_java(a: Instance, b: Instance) -> jResult<bool> {
     with_jvm(|jvm| -> jResult<_> { jvm.to_rust(object_method(vec![a, b], "equals")?) })
+}
+
+/// Check if two clojure instances are equals
+pub fn equals_clj(a: Instance, b: Instance) -> jResult<bool> {
+    with_jvm(|jvm| -> jResult<_> { jvm.to_rust(cljinvoke!("=", a, b)?) })
 }
 
 /// Load an edn format data as clojure instance
@@ -109,16 +117,16 @@ pub fn historify(i: Instance) -> jResult<Instance> {
 /// Convert a clojure instance to json string
 pub fn clj_jsonify(inst: Instance) -> jResult<String> {
     with_jvm(|_| {
-        let json = CLOJURE.require("cheshire.core")?;
-        java_to_string(&nsinvoke!(json, "generate-string", inst)?)
+        let serde = NS_REGISTER.get_or_register("serde");
+        java_to_string(&nsinvoke!(serde, "serialize-with-key-type", inst)?)
     })
 }
 
 /// Convert a json string to clojure instance
 pub fn clj_from_json(s: &str) -> jResult<Instance> {
     with_jvm(|_| {
-        let json = CLOJURE.require("cheshire.core")?;
-        nsinvoke!(json, "parse-string", s)
+        let serde = NS_REGISTER.get_or_register("serde");
+        nsinvoke!(serde, "deserialize-list-to-vec", s)
     })
 }
 
@@ -157,10 +165,12 @@ mod tests {
     use crate::{cljeval, init_jvm};
 
     #[test]
-    fn test_convertion_between_clojure_and_rust() {
+    fn test_serde_between_clojure_and_rust() {
         #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
         struct TestSer {
+            #[serde(rename = ":a")]
             a: i32,
+            #[serde(rename = ":b")]
             b: String,
         }
         init_jvm();
@@ -188,7 +198,10 @@ mod tests {
         init_jvm();
         let a = cljeval!((assoc {:a 1} :b "hello")).unwrap();
         let b = cljeval!((assoc {:a 1} :b "hello")).unwrap();
-        assert!(equals(a, b).unwrap());
+        assert!(equals_java(a, b).unwrap());
+        let a = cljeval!((assoc {:a 1} :b "hello")).unwrap();
+        let b = cljeval!((assoc {:a 1} :b "hello")).unwrap();
+        assert!(equals_clj(a, b).unwrap());
     }
 
     #[test]
@@ -201,5 +214,18 @@ mod tests {
         let clj_obj2 = clj_from_json(&json_str).die();
         let res = clj_to_string(clj_obj2).die();
         assert_eq!(edn_str, res);
+    }
+
+    /// more complex example of json serde, use a real history for testing.
+    #[test]
+    fn json_serde_should_be_consistent_c() {
+        init_jvm();
+        let edn_str = include_str!("../../assets/ex_history.edn");
+        let clj_obj = read_edn(edn_str).die();
+        let clj_obj_clone = read_edn(edn_str).die();
+        let json_str = clj_jsonify(clj_obj).die();
+        println!("{}", json_str);
+        let clj_obj2 = clj_from_json(&json_str).die();
+        assert!(equals_clj(clj_obj_clone, clj_obj2).unwrap());
     }
 }

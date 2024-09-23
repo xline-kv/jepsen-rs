@@ -47,6 +47,7 @@ mod tests {
     use super::*;
     use crate::{
         checker::{Check, ConsistencyModel},
+        ffi::read_edn,
         utils::log_init,
     };
 
@@ -54,13 +55,8 @@ mod tests {
     fn test_elle_rw_checker() -> anyhow::Result<()> {
         log_init();
         let checker = ElleRwChecker::default();
-        let history_str = r#"[
-          { "index": 0, "type": "invoke", "f": "txn", "value": [["w", 2, 1]], "time": 3291485317, "process": 0, "error": null }, 
-          { "index": 1, "type": "ok", "f": "txn", "value": [["w", 2, 1]], "time": 3767733708, "process": 0, "error": null },
-          { "index": 2, "type": "invoke", "f": "txn", "value": [["r", 2, null]], "time": 3891485317, "process": 1, "error": null }, 
-          { "index": 3, "type": "ok", "f": "txn", "value": [["r", 2, 1]], "time": 3967733708, "process": 1, "error": null } 
-        ]"#;
-        let history: SerializableHistoryList = serde_json::from_str(history_str)?;
+        let history = read_edn(include_str!("../../assets/ex_history.edn"))?;
+        let history: SerializableHistoryList = history.to_de()?;
         let res = checker.check(
             &history,
             CheckOption::default()

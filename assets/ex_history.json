@@ -1,32 +1,31 @@
 [
-  { "index": 0, "type": "invoke", "f": "txn", "value": [["w", 2, 1]], "time": 3291485317, "process": 0, "error": null },
+  { ":type": ":invoke", ":f": ":txn", ":value": [[":w", 2, 1]], ":time": 3291485317, ":process": 0, ":index": 0 },
   {
-    "index": 1,
-    "type": "invoke",
-    "f": "txn",
-    "value": [
-      ["r", 0, null],
-      ["w", 1, 1],
-      ["r", 2, null],
-      ["w", 1, 2]
+    ":type": ":invoke",
+    ":f": ":txn",
+    ":value": [
+      [":r", 0, null],
+      [":w", 1, 1],
+      [":r", 2, null],
+      [":w", 1, 2]
     ],
-    "time": 3296209422,
-    "process": 2,
-    "error": null
+    ":time": 3296209422,
+    ":process": 2,
+    ":index": 1
   },
   {
-    "index": 2,
-    "type": "fail",
-    "f": "txn",
-    "value": [
-      ["r", 0, null],
-      ["w", 1, 1],
-      ["r", 2, null],
-      ["w", 1, 2]
+    ":type": ":fail",
+    ":f": ":txn",
+    ":value": [
+      [":r", 0, null],
+      [":w", 1, 1],
+      [":r", 2, null],
+      [":w", 1, 2]
     ],
-    "time": 3565403674,
-    "process": 2,
-    "error": ["duplicate-key", "etcdserver: duplicate key given in txn request"]
+    ":time": 3565403674,
+    ":process": 2,
+    ":index": 2,
+    ":error": [":duplicate-key", "etcdserver: duplicate key given in txn request"]
   },
-  { "index": 3, "type": "ok", "f": "txn", "value": [["w", 2, 1]], "time": 3767733708, "process": 0, "error": null }
+  { ":type": ":ok", ":f": ":txn", ":value": [[":w", 2, 1]], ":time": 3767733708, ":process": 0, ":index": 3 }
 ]

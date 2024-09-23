@@ -22,22 +22,33 @@ pub type ErrorType = Vec<String>;
 /// causes the unknown check result in checker.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SerializableHistory<F = OpFunctionType, ERR = ErrorType> {
+    #[serde(rename = ":index")]
     pub index: u64,
-    #[serde(rename = "type")]
+    #[serde(rename = ":type")]
     pub type_: HistoryType,
+    #[serde(rename = ":f")]
     pub f: F,
+    #[serde(rename = ":value")]
     pub value: Op,
+    #[serde(rename = ":time")]
     pub time: u64,
+    #[serde(rename = ":process")]
     pub process: u64,
+    #[serde(rename = ":error")]
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<ERR>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum HistoryType {
+    #[serde(rename = ":invoke")]
     Invoke,
+    #[serde(rename = ":ok")]
     Ok,
+    #[serde(rename = ":fail")]
     Fail,
+    #[serde(rename = ":info")]
     Info,
 }
 
@@ -125,11 +136,10 @@ mod tests {
     use j4rs::Instance;
 
     use super::*;
-    use crate::{
-        cljevalstr,
-        ffi::{print_clj, read_edn, register::NS_REGISTER, FromSerde, ToDe},
-        init_jvm, nsinvoke, CLOJURE,
-    };
+    use crate::ffi::{
+            equals_clj, read_edn,
+            FromSerde, ToDe,
+        };
 
     #[test]
     fn test_history_list_conversion() -> anyhow::Result<()> {
@@ -137,24 +147,12 @@ mod tests {
         let res: SerializableHistoryList = his_edn.to_de()?;
 
         // additional test for serialization and deserialization
-        let res_json: SerializableHistoryList =
+        let res_from_json: SerializableHistoryList =
             serde_json::from_str(include_str!("../assets/ex_history.json"))?;
-        assert_eq!(res, res_json);
+        assert_eq!(res, res_from_json);
 
         let res: Instance = Instance::from_ser(res)?;
-        print_clj(res);
-        Ok(())
-    }
-
-    // TODO: add test for the deserialization in clojure after fixing the
-    // problem in the doc of [`SerializableHistory`].
-    #[test]
-    fn mytest() -> anyhow::Result<()> {
-        init_jvm();
-        let x = r#"{:type :invoke, :f :txn, :value [[:w 2 1]], :time 3291485317, :process 0, :index 0}"#;
-        let ns = NS_REGISTER.get_or_register("serde");
-        let res = nsinvoke!(ns, "custom-serialize", read_edn(x))?;
-        print_clj(res);
+        assert!(equals_clj(res, read_edn(include_str!("../assets/ex_history.edn"))?).unwrap());
         Ok(())
     }
 }

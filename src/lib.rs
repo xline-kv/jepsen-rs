@@ -4,6 +4,7 @@
 //! NOTE: Requires java 21 due to https://github.com/jepsen-io/jepsen/issues/585
 
 #![warn(clippy::cargo)]
+#![allow(clippy::multiple_crate_versions)]
 
 pub mod checker;
 pub mod client;

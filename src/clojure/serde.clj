@@ -2,7 +2,7 @@
   (:require [cheshire.core :as json])
   (:require [clojure.walk :as walk]))
 
-(defn custom-serialize [data]
+(defn serialize-with-key-type [data]
   (json/generate-string
     (walk/postwalk
       (fn [x]
@@ -11,7 +11,7 @@
           x))
       data)))
 
-(defn custom-deserialize [json-str]
+(defn deserialize-with-key-type [json-str]
   (let [data (json/parse-string json-str)]
     (walk/postwalk
       (fn [x]
@@ -21,3 +21,10 @@
             x)
           x))
       data)))
+
+(defn deserialize-list-to-vec [json-str]
+  (let [data (deserialize-with-key-type json-str)]
+    (cond
+     (vector? data) data
+     (seq? data) (into [] data)
+     :else data)))
