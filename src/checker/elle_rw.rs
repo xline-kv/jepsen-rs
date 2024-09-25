@@ -33,7 +33,7 @@ impl super::Check for ElleRwChecker {
         with_jvm(|_| {
             let h = historify(Instance::from_ser(history)?)?;
             trace!("historify done");
-            info!("check with option: {:?}", serde_json::to_string(&option));
+            info!("check with option: {:?}", &option);
             let op_clj = Instance::from_ser(option)?;
             let res = nsinvoke!(self.ns, "check", op_clj, h)?;
             trace!("check done");
@@ -60,7 +60,7 @@ mod tests {
         let res = checker.check(
             &history,
             CheckOption::default()
-                .consistency_models(ConsistencyModel::Serializable)
+                .consistency_models([ConsistencyModel::Serializable])
                 .analyzer("wr-graph"),
         )?;
         println!("{:#?}", res);

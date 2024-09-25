@@ -11,15 +11,18 @@
           x))
       data)))
 
+
 (defn deserialize-with-key-type [json-str]
   (let [data (json/parse-string json-str)]
     (walk/postwalk
       (fn [x]
-        (if (string? x)
-          (if (.startsWith x ":")
-            (keyword (subs x 1))
-            x)
-          x))
+        (cond
+          (string? x) (if (.startsWith x ":")
+                        (keyword (subs x 1))
+                        x)
+          (number? x) (long x)  ;; if this line not there, it will deserialize to Integer, 
+                                ;; that causes problem in history.
+          :else x))
       data)))
 
 (defn deserialize-list-to-vec [json-str]

@@ -1,5 +1,5 @@
 pub mod elle_rw;
-use std::path::PathBuf;
+use std::{collections::HashSet, path::PathBuf};
 
 use anyhow::Result;
 use default_struct_builder::DefaultBuilder;
@@ -17,14 +17,14 @@ fn default_out_dir() -> PathBuf {
 pub struct SerializableCheckResult {
     #[serde(rename = ":valid?")]
     valid: ValidType,
-    #[serde(rename = ":anomaly-types")]
+    #[serde(rename = ":anomaly-types", default)]
     anomaly_types: Vec<String>,
     #[serde(rename = ":anomalies")]
-    anomalies: serde_json::Value,
-    #[serde(rename = ":not")]
-    not: Vec<String>,
-    #[serde(rename = ":also-not")]
-    also_not: Vec<String>,
+    anomalies: Option<serde_json::Value>,
+    #[serde(rename = ":not", default)]
+    not: HashSet<String>,
+    #[serde(rename = ":also-not", default)]
+    also_not: HashSet<String>,
 }
 
 #[serde_with::skip_serializing_none]
@@ -33,7 +33,7 @@ pub struct SerializableCheckResult {
 pub struct CheckOption {
     #[builder(into)]
     #[serde(rename = ":consistency-models")]
-    consistency_models: Option<ConsistencyModel>,
+    consistency_models: Option<Vec<ConsistencyModel>>,
     #[serde(default = "default_out_dir")]
     #[serde(rename = ":directory")]
     directory: PathBuf,
@@ -73,7 +73,7 @@ impl<'de> Deserialize<'de> for ValidType {
         match value {
             Value::Bool(b) => Ok(if b { ValidType::True } else { ValidType::False }),
             Value::String(s) => {
-                if s == "unknown" {
+                if s == ":unknown" {
                     Ok(ValidType::Unknown)
                 } else {
                     Err(serde::de::Error::custom("invalid string value"))
@@ -92,7 +92,7 @@ impl Serialize for ValidType {
         match self {
             ValidType::True => serializer.serialize_bool(true),
             ValidType::False => serializer.serialize_bool(false),
-            ValidType::Unknown => serializer.serialize_str("unknown"),
+            ValidType::Unknown => serializer.serialize_str(":unknown"),
         }
     }
 }
@@ -153,11 +153,13 @@ pub trait Check {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ffi::{read_edn, ToDe};
 
     #[test]
-    fn test_deser_from_json_result() -> anyhow::Result<()> {
-        let json = include_str!("../../assets/check_result.json");
-        let _res: SerializableCheckResult = serde_json::from_str(json)?;
+    fn test_deser_from_json_result_should_be_ok() -> anyhow::Result<()> {
+        let edn = include_str!("../../assets/check_result.edn");
+        let ins = read_edn(edn)?;
+        let _res: SerializableCheckResult = ins.to_de()?;
         Ok(())
     }
 
@@ -165,11 +167,19 @@ mod tests {
     fn test_check_option_serialization() {
         let option = CheckOption::default()
             .analyzer("wr-graph")
-            .consistency_models(ConsistencyModel::CursorStability);
+            .consistency_models([ConsistencyModel::CursorStability]);
         let json = serde_json::to_string(&option).unwrap();
         assert_eq!(
-            r#"{":consistency-models":":cursor-stability",":directory":"./out",":analyzer":"wr-graph"}"#,
+            r#"{":consistency-models":[":cursor-stability"],":directory":"./out",":analyzer":"wr-graph"}"#,
             json
         );
+    }
+
+    #[test]
+    fn test_check_result_deserialization() -> anyhow::Result<()> {
+        let result = r#"{":valid?":":unknown",":anomaly-types":[":empty-transaction-graph"],":anomalies":{":empty-transaction-graph":true},":not":[],":also-not":[]}"#;
+        let res: SerializableCheckResult = serde_json::from_str(result)?;
+        assert!(matches!(res.valid, ValidType::Unknown));
+        Ok(())
     }
 }
