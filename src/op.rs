@@ -1,3 +1,6 @@
+//! This module defines operation that can be executed on a database, and
+//! provides the serialization / deserialization method of [`Op`] and [`Ops`].
+
 use std::{
     fmt,
     ops::{Deref, DerefMut},
@@ -10,7 +13,8 @@ use serde::{
 };
 use serde_json::{json, Value};
 
-/// An operation that can be executed on a database
+/// An operation that can be executed on a database. Generatored by jepsen
+/// Generator.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Op {
     Read(u64, Option<u64>),
@@ -18,14 +22,16 @@ pub enum Op {
     Txn(Vec<Op>),
 }
 
-/// Op type of functions that being applied to db
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Op type of functions that being applied to db, for serialization and
+/// deserialization.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum OpFunctionType {
-    #[serde(rename = "r")]
+    #[serde(rename = ":r")]
     Read,
-    #[serde(rename = "w")]
+    #[serde(rename = ":w")]
     Write,
+    #[serde(rename = ":txn")]
     Txn,
 }
 
@@ -76,8 +82,8 @@ fn parse_op(json: &Value) -> Result<Op> {
                 let key = arr[1].as_u64().ok_or(anyhow!("Invalid key"))?;
                 let value = arr[2].as_u64();
                 match op_type {
-                    "r" => Ok(Op::Read(key, value)),
-                    "w" => Ok(Op::Write(key, value.ok_or(anyhow!("Invalid value"))?)),
+                    ":r" => Ok(Op::Read(key, value)),
+                    ":w" => Ok(Op::Write(key, value.ok_or(anyhow!("Invalid value"))?)),
                     _ => Err(anyhow!("Unknown op type")),
                 }
             } else {
@@ -93,8 +99,8 @@ fn parse_op(json: &Value) -> Result<Op> {
 /// Convert an [`Op`] to JSON
 fn op_to_json(op: &Op) -> Value {
     match op {
-        Op::Read(key, value) => json!(["r", key, value]),
-        Op::Write(key, value) => json!(["w", key, value]),
+        Op::Read(key, value) => json!([":r", key, value]),
+        Op::Write(key, value) => json!([":w", key, value]),
         Op::Txn(ops) => {
             let json_ops: Vec<Value> = ops.iter().map(op_to_json).collect();
             Value::Array(json_ops)
@@ -145,15 +151,15 @@ mod test {
     use j4rs::Instance;
 
     use super::*;
-    use crate::utils::{FromSerde, ToDe};
+    use crate::ffi::{FromSerde, ToDe};
 
     #[test]
     fn test_op_serde() {
         let res = [
-            (r#"["w",6,1]"#, Op::Write(6, 1)),
-            (r#"["r",8,null]"#, Op::Read(8, None)),
+            (r#"[":w",6,1]"#, Op::Write(6, 1)),
+            (r#"[":r",8,null]"#, Op::Read(8, None)),
             (
-                r#"[["w",6,1],["r",8,null]]"#,
+                r#"[[":w",6,1],[":r",8,null]]"#,
                 Op::Txn(vec![Op::Write(6, 1), Op::Read(8, None)]),
             ),
         ];
@@ -166,7 +172,7 @@ mod test {
     #[test]
     fn test_ops_serde() {
         let json_str = r#"
-        [[["w",6,1],["w",8,1]],[["w",9,1],["r",8,null]],[["w",6,2],["r",6,null]],[["w",9,2]],[["r",8,null],["w",9,3]]]
+        [[[":w",6,1],[":w",8,1]],[[":w",9,1],[":r",8,null]],[[":w",6,2],[":r",6,null]],[[":w",9,2]],[[":r",8,null],[":w",9,3]]]
         "#;
 
         let ops = Ops(vec![
@@ -182,7 +188,7 @@ mod test {
     }
 
     #[test]
-    fn test_convertion_between_ops_and_instance() {
+    fn serde_between_ops_and_instance_should_be_consistent() {
         let ops = Ops(vec![
             Op::Txn(vec![Op::Write(6, 1), Op::Write(8, 1)]),
             Op::Txn(vec![Op::Write(9, 1), Op::Read(8, None)]),

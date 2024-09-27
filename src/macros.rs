@@ -1,10 +1,5 @@
-/// Reads data in edn format
-#[macro_export]
-macro_rules! cljread {
-    ($($char:tt)*) => {
-        cljinvoke_java_api!("read", stringify!($($char)*)).unwrap()
-    };
-}
+//! This module provides some macros to help you invoke clojure functions and
+//! deal with clojure instances.
 
 /// Invoke a clojure function.
 /// ```
@@ -25,7 +20,21 @@ macro_rules! cljinvoke {
     };
 }
 
-/// Evaluate the Clojure string
+/// Evaluate the Clojure raw string
+/// ```
+/// use j4rs::{JvmBuilder, Instance, InvocationArg};
+/// use jepsen_rs::{cljinvoke, cljevalstr, CljCore};
+/// let _jvm = JvmBuilder::new().build();
+/// cljevalstr!("(println \"hello\")").unwrap();
+/// ```
+#[macro_export]
+macro_rules! cljevalstr {
+    ($s:expr) => {
+        $crate::cljinvoke!("load-string", $s)
+    };
+}
+
+/// Evaluate the Clojure raw string
 /// ```
 /// use j4rs::{JvmBuilder, Instance, InvocationArg};
 /// use jepsen_rs::{cljinvoke, cljeval, CljCore};
@@ -35,12 +44,14 @@ macro_rules! cljinvoke {
 #[macro_export]
 macro_rules! cljeval {
     ($($char:tt)*) => {
-        $crate::cljinvoke!("load-string", stringify!($($char)*))
+        $crate::cljevalstr!(stringify!($($char)*))
     };
 }
 
 /// Invoke a clojure from clojure.java.api.Clojure
+///
 /// https://clojure.github.io/clojure/javadoc/clojure/java/api/Clojure.html
+#[macro_export]
 macro_rules! cljinvoke_java_api {
     ($name:expr) => {
         $crate::invoke_clojure_java_api($name, &[])
@@ -55,7 +66,7 @@ macro_rules! cljinvoke_java_api {
 /// Invoke a clojure class method from namespace
 /// ```
 /// use j4rs::{JvmBuilder, Instance, InvocationArg};
-/// use jepsen_rs::{nsinvoke, cljeval, CljCore};
+/// use jepsen_rs::{nsinvoke, cljeval, CljCore, CLOJURE};
 /// let _jvm = JvmBuilder::new().build();
 /// let g = CLOJURE.require("jepsen.generator").unwrap();
 /// let res = nsinvoke!(g, "phases", cljeval!({:f :write, :value 3} {:f :read}).unwrap()).unwrap();
@@ -74,11 +85,10 @@ macro_rules! nsinvoke {
     };
 }
 
-/// Invoke a clojure class method from namespace. There still exists a bug in
-/// this macro, so it is **not recommended** to use it.
-/// ```
+/// Invoke a clojure class method from namespace.
+/// ```ignore
 /// use j4rs::{JvmBuilder, Instance, InvocationArg};
-/// use jepsen_rs::{nseval, cljeval, CljCore};
+/// use jepsen_rs::{nseval, nsevalstr, cljeval, CljCore, CLOJURE};
 /// let _jvm = JvmBuilder::new().build();
 /// let g = CLOJURE.require("jepsen.generator").unwrap();
 /// let res = nseval!(g, (phases {:f :write, :value 3} {:f :read})).unwrap();
@@ -86,6 +96,7 @@ macro_rules! nsinvoke {
 #[macro_export]
 macro_rules! nseval {
     ($ns:expr, ($($char:tt)*)) => {
+        todo!("There still exists a bug in this macro, so it is **not recommended** to use it.")
         $crate::nsevalstr!($ns, stringify!($($char)*))
     };
 }
