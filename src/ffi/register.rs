@@ -1,9 +1,8 @@
 //! Every clojure code should be registered in this module.
 
-use std::{
-    collections::HashSet,
-    sync::{LazyLock, Mutex},
-};
+use std::{collections::HashSet, sync::Mutex};
+
+use once_cell::sync::Lazy as LazyLock;
 
 use crate::{cljevalstr, init_jvm, CljNs, CLOJURE};
 
