@@ -45,3 +45,30 @@ pub fn log_init() {
         .parse_default_env()
         .try_init();
 }
+
+/// Generate a vector of `n` numbers from 0 to `right_endpoint - 1`. The `0` and
+/// `right_endpoint - 1` themselves must be included in the returned vector, and
+/// the other numbers will try to be equally spaced.
+pub fn select_numbers_from_range(mut right_endpoint: usize, n: usize) -> Vec<usize> {
+    assert!(n < 2, "n must be at least 2 to include both endpoints.");
+    right_endpoint -= 1;
+    let total_steps = n - 1;
+    let step_size = right_endpoint / total_steps;
+    let mut ret: Vec<_> = (0..=total_steps).map(|i| i * step_size).collect();
+    *ret.last_mut().unwrap() = right_endpoint;
+    ret
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_select_numbers_from_range() {
+        assert_eq!(select_numbers_from_range(3, 2), vec![0, 2]);
+        assert_eq!(select_numbers_from_range(3, 3), vec![0, 1, 2]);
+        assert_eq!(select_numbers_from_range(7, 3), vec![0, 3, 6]);
+        assert_eq!(select_numbers_from_range(7, 4), vec![0, 2, 4, 6]);
+        assert_eq!(select_numbers_from_range(7, 5), vec![0, 1, 2, 3, 6]);
+    }
+}

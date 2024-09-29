@@ -1,6 +1,7 @@
 pub mod context;
 pub mod controller;
 pub mod elle_rw;
+pub mod nemesis;
 #[cfg(test)]
 use std::ops::{AddAssign, RangeFrom};
 use std::{fmt, pin::Pin, sync::Arc};
