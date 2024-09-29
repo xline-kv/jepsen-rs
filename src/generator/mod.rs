@@ -3,12 +3,13 @@ pub mod controller;
 pub mod elle_rw;
 #[cfg(test)]
 use std::ops::{AddAssign, RangeFrom};
-use std::{fmt, ops::SubAssign, pin::Pin, sync::Arc};
+use std::{fmt, pin::Pin, sync::Arc};
 
 use context::GeneratorId;
 pub use context::Global;
 use controller::{DelayStrategy, GeneratorGroupStrategy};
 use log::{debug, trace};
+use tap::Tap;
 use tokio_stream::{Stream, StreamExt as _};
 
 use crate::{
@@ -16,6 +17,9 @@ use crate::{
     op::Op,
     utils::{AsyncIter, ExtraStreamExt},
 };
+
+/// The content of a generator, a tuple of [`Op`] and [`DelayStrategy`].
+pub type GeneratorContent<U> = (U, DelayStrategy);
 
 /// Cache size for the generator.
 pub const GENERATOR_CACHE_SIZE: usize = 200;
@@ -55,11 +59,13 @@ impl RawGenerator for RangeFrom<i32> {
 /// The builder of generator.
 pub struct GeneratorBuilder<'a, U: Send + fmt::Debug = Op, ERR: Send + 'a = ErrorType> {
     global: Arc<Global<'a, U, ERR>>,
-    seq: Option<Pin<Box<dyn Stream<Item = U> + Send + 'a>>>,
-    delay_strategy: Option<Pin<Box<dyn Stream<Item = DelayStrategy> + Send + 'a>>>,
+    /// user provided sequence
+    raw_seq: Option<Box<dyn Stream<Item = U> + Send + Unpin + 'a>>,
+    /// seq which is gotten from other generators
+    wrapped_seq: Option<Pin<Box<dyn Stream<Item = GeneratorContent<U>> + Send + 'a>>>,
+    /// user provided delay strategy for all elements of this generator
     delay_strategy_one: Option<DelayStrategy>,
     id: Option<GeneratorId>,
-    size: Option<usize>,
 }
 
 impl<'a, U: Send + fmt::Debug + 'a, ERR: 'a + Send> GeneratorBuilder<'a, U, ERR> {
@@ -67,11 +73,10 @@ impl<'a, U: Send + fmt::Debug + 'a, ERR: 'a + Send> GeneratorBuilder<'a, U, ERR>
     pub fn new(global: Arc<Global<'a, U, ERR>>) -> Self {
         Self {
             global,
-            seq: None,
-            delay_strategy: None,
+            raw_seq: None,
+            wrapped_seq: None,
             delay_strategy_one: None,
             id: None,
-            size: None,
         }
     }
     #[inline]
@@ -80,130 +85,95 @@ impl<'a, U: Send + fmt::Debug + 'a, ERR: 'a + Send> GeneratorBuilder<'a, U, ERR>
         self
     }
     #[inline]
-    pub fn size(mut self, size: usize) -> Self {
-        self.size = Some(size);
+    pub fn seq(mut self, seq: impl Stream<Item = U> + Send + Unpin + 'a) -> Self {
+        self.raw_seq = Some(Box::new(seq));
         self
     }
+    /// function `wrapped_seq` is used for the inner StreamExt functions, and
+    /// may not be used by the user.
     #[inline]
-    pub fn seq(self, seq: impl Stream<Item = U> + Send + 'a) -> Self {
+    pub fn wrapped_seq(self, seq: impl Stream<Item = GeneratorContent<U>> + Send + 'a) -> Self {
         self.pinned_seq(Box::pin(seq))
     }
     #[inline]
-    pub fn pinned_seq(mut self, seq: Pin<Box<dyn Stream<Item = U> + Send + 'a>>) -> Self {
-        self.seq = Some(seq);
-        self
-    }
-
-    /// use a given [`DelayStrategy`] for all times.
-    ///
-    /// note that the function must be called after `seq` or `pinned_seq`.
-    #[inline]
-    pub fn delay(mut self, delay_strategy: DelayStrategy) -> Self {
-        self.delay_strategy_one = Some(delay_strategy);
-        self
-    }
-
-    /// delays for a given sequence of [`DelayStrategy`]s
-    ///
-    /// note that the function must be called after `seq` or `pinned_seq`.
-    #[inline]
-    pub fn delay_stream(
-        self,
-        delay_strategy: impl Stream<Item = DelayStrategy> + Send + 'a,
-    ) -> Self {
-        self.pinned_delay_stream(Box::pin(delay_strategy))
-    }
-
-    /// delays for a given pinned sequence of [`DelayStrategy`]s
-    ///
-    /// note that the function must be called after `seq` or `pinned_seq`.
-    #[inline]
-    pub fn pinned_delay_stream(
+    pub fn pinned_seq(
         mut self,
-        delay_strategy: Pin<Box<dyn Stream<Item = DelayStrategy> + Send + 'a>>,
+        seq: Pin<Box<dyn Stream<Item = GeneratorContent<U>> + Send + 'a>>,
     ) -> Self {
-        self.delay_strategy = Some(delay_strategy);
+        self.wrapped_seq = Some(seq);
+        self
+    }
+    #[inline]
+    pub fn delay_strategy(mut self, delay: DelayStrategy) -> Self {
+        self.delay_strategy_one = Some(delay);
         self
     }
 
+    /// Build the generator.
+    ///
+    /// If `wrapped_seq` is provided, the `raw_seq` will be ignored. If
+    /// `wrapped_seq` is none, the `raw_seq` must be provided, and if
+    /// `delay_strategy` is not provided, use default delay strategy.
     #[inline]
     pub fn build(self) -> Generator<'a, U, ERR> {
         let id = self.id.unwrap_or_else(|| self.global.get_id());
         debug!("build generator: {}", id.get());
-        let size = self.size.unwrap_or_else(|| {
-            let (size, validate) = self.seq.as_ref().expect("self.seq must be set").size_hint();
-            assert_eq!(
-                size,
-                validate.expect("size hint must be an exact number"),
-                "size hint must be an exact number"
-            );
-            size
-        });
+        let seq = self
+            .wrapped_seq
+            .or_else(|| {
+                let delay_strategy = self
+                    .delay_strategy_one
+                    .unwrap_or_default();
+                self.raw_seq.map(|x| {
+                    let pinned_stream = Pin::new(x);
+                    let mapped_stream =
+                        pinned_stream.map(move |item| (item, delay_strategy.clone()));
+                    Box::pin(mapped_stream)
+                        as Pin<Box<dyn Stream<Item = GeneratorContent<U>> + Send + 'a>>
+                })
+            })
+            .expect("cannot construct a generator: you must provide a `wrapped_seq`, or a `raw_seq` with a `delay_strategy`");
 
-        let delay_strategy = self.delay_strategy.unwrap_or_else(|| {
-            // TODO: use repeat_n when https://github.com/rust-lang/rust/issues/104434 stablized
-            Box::pin(tokio_stream::iter(
-                std::iter::repeat(self.delay_strategy_one.unwrap_or_default()).take(size),
-            ))
-        });
-
-        let seq = self.seq.unwrap_or_else(|| Box::pin(tokio_stream::empty()));
         Generator {
             id,
             global: self.global,
             seq,
-            delay_strategy,
-            size,
         }
     }
 }
 
-/// The generator. Each generator is a **FINITE** Op sequence with a same size
-/// sequence of [`DelayStrategy`]s. When generating each Op, the generator will
-/// take an element from both the sequence and the [`DelayStrategy`] sequence,
-/// returns the [`Op`] after delay for the corresponding [`DelayStrategy`].
+/// The generator. Each generator is a Op sequence with a same size sequence of
+/// [`DelayStrategy`]s. When generating each Op, the generator will take an
+/// element from both the sequence and the [`DelayStrategy`] sequence, returns
+/// the [`Op`] after delay for the corresponding [`DelayStrategy`].
 pub struct Generator<'a, U: Send + fmt::Debug = Op, ERR: Send + 'a = ErrorType> {
     /// generator id
     pub id: GeneratorId,
     /// A reference to the global context
     pub global: Arc<Global<'a, U, ERR>>,
-    /// The sequence (stream) of generator. Note that the seq is finite.
-    pub seq: Pin<Box<dyn Stream<Item = U> + Send + 'a>>,
-    /// The delay strategy stream, delays between every `next()` function
-    pub delay_strategy: Pin<Box<dyn Stream<Item = DelayStrategy> + Send + 'a>>,
-    /// The size of `seq` and `delay_strategy`.
-    pub size: usize,
+    /// The sequence (stream) of generator, each element is (Op, DelayStrategy).
+    pub seq: Pin<Box<dyn Stream<Item = GeneratorContent<U>> + Send + 'a>>,
 }
 
 impl<'a, U: Send + fmt::Debug + 'a, ERR: 'a + Send> Generator<'a, U, ERR> {
     pub fn map(self, f: impl Fn(U) -> U + Send + 'a) -> Self {
         GeneratorBuilder::new(self.global)
             .id(self.id)
-            .pinned_delay_stream(self.delay_strategy)
-            .seq(self.seq.map(f))
-            .size(self.size)
+            .wrapped_seq(self.seq.map(move |(u, d)| (f(u), d)))
             .build()
     }
 
-    /// The seq is finite, so we can collect it and calculate its size.
-    /// We cannot use `size_hint` here, because filter will break the hint.
     pub async fn filter(self, f: impl Fn(&U) -> bool + Send + 'a) -> Self {
-        let zipped =
-            futures_util::StreamExt::zip(self.seq, self.delay_strategy).filter(|(x, _)| f(x));
-        let (seq, delay): (Vec<_>, Vec<_>) = futures_util::StreamExt::unzip(zipped).await;
         GeneratorBuilder::new(self.global)
             .id(self.id)
-            .delay_stream(tokio_stream::iter(delay))
-            .seq(tokio_stream::iter(seq))
+            .wrapped_seq(self.seq.filter(move |(u, _)| f(u)))
             .build()
     }
 
     pub fn take(self, n: usize) -> Self {
         GeneratorBuilder::new(self.global)
             .id(self.id)
-            .delay_stream(self.delay_strategy.take(n))
-            .seq(self.seq.take(n))
-            .size(n)
+            .wrapped_seq(self.seq.take(n))
             .build()
     }
 
@@ -215,17 +185,13 @@ impl<'a, U: Send + fmt::Debug + 'a, ERR: 'a + Send> Generator<'a, U, ERR> {
     /// will alloc a new id.
     pub async fn split_at(mut self, n: usize) -> (Self, Self) {
         let first_seq = self.seq.as_mut().split_at(n).await;
-        let first_delay = self.delay_strategy.as_mut().split_at(n).await;
         (
             GeneratorBuilder::new(Arc::clone(&self.global))
                 .id(self.id)
-                .delay_stream(tokio_stream::iter(first_delay))
-                .size(first_seq.len())
-                .seq(tokio_stream::iter(first_seq))
+                .wrapped_seq(tokio_stream::iter(first_seq))
                 .build(),
             GeneratorBuilder::new(self.global)
                 .pinned_seq(self.seq)
-                .pinned_delay_stream(self.delay_strategy)
                 .build(),
         )
     }
@@ -233,13 +199,15 @@ impl<'a, U: Send + fmt::Debug + 'a, ERR: 'a + Send> Generator<'a, U, ERR> {
     /// Chain two generators together.
     pub fn chain(self, other: Self) -> Self {
         let out_seq = self.seq.chain(other.seq);
-        let out_delay = self.delay_strategy.chain(other.delay_strategy);
         GeneratorBuilder::new(self.global)
             .id(self.id)
-            .seq(out_seq)
-            .delay_stream(out_delay)
-            .size(self.size + other.size)
+            .wrapped_seq(out_seq)
             .build()
+    }
+
+    /// Collect the generator into a vector, without [`DelayStrategy`].
+    pub async fn collect(self) -> Vec<U> {
+        self.seq.map(|x| x.0).collect().await
     }
 }
 
@@ -247,24 +215,13 @@ impl<'a, U: Send + fmt::Debug + 'a, ERR: 'a + Send> Generator<'a, U, ERR> {
 impl<'a, ERR: 'a + Send, U: Send + fmt::Debug + 'a> AsyncIter for Generator<'a, U, ERR> {
     type Item = U;
     async fn next(&mut self) -> Option<Self::Item> {
-        let item = self.seq.next().await;
-        if item.is_none() {
-            trace!("generator {} yields None", self.id.get());
-            return None;
-        }
-        let delay = self
-            .delay_strategy
+        let (item, delay) = self
+            .seq
             .next()
             .await
-            .expect("delay strategy must be no less than seq");
+            .tap(|x| trace!("generator {} yields {:?}", self.id.get(), x))?;
         delay.delay().await;
-        self.size.sub_assign(1);
-        trace!(
-            "generator {} yields an item: {:?}",
-            self.id.get(),
-            item.as_ref().unwrap()
-        );
-        item
+        Some(item)
     }
     async fn next_with_id(&mut self) -> Option<(Self::Item, u64)> {
         self.next().await.map(|x| (x, self.id.get()))
@@ -441,7 +398,7 @@ mod tests {
         let seq = tokio_stream::iter(global.take_seq(50));
         let gen = GeneratorBuilder::new(global).seq(seq).build();
         let gen = gen.map(|x| x + 2).filter(|x| x % 3 == 0).await.take(5);
-        let out: Vec<_> = gen.seq.collect().await;
+        let out: Vec<_> = gen.collect().await;
         assert_eq!(out, vec![3, 6, 9, 12, 15]);
     }
 
@@ -451,8 +408,8 @@ mod tests {
         let seq = tokio_stream::iter(global.take_seq(5));
         let gen = GeneratorBuilder::new(Arc::clone(&global)).seq(seq).build();
         let (first, second) = gen.split_at(3).await;
-        let first: Vec<_> = first.seq.collect().await;
-        let second: Vec<_> = second.seq.collect().await;
+        let first: Vec<_> = first.collect().await;
+        let second: Vec<_> = second.collect().await;
         assert_eq!(first, vec![1, 2, 3]);
         assert_eq!(second, vec![4, 5]);
     }
@@ -527,25 +484,5 @@ mod tests {
         assert_eq!(gen_group.next_with_id().await.unwrap(), (6, 1));
         assert_eq!(gen_group.next_with_id().await.unwrap(), (2, 0));
         assert_eq!(gen_group.next_with_id().await.unwrap(), (7, 1));
-    }
-
-    #[madsim::test]
-    async fn test_generator_delay_strategy_and_size() {
-        let global = Arc::new(Global::<_, String>::new(1..));
-        let g1 = GeneratorBuilder::new(Arc::clone(&global))
-            .seq(tokio_stream::iter(global.take_seq(5)))
-            .build();
-        assert_eq!(g1.size, 5);
-        // size is correct
-        let g2 = g1.map(|x| x).filter(|x| x % 2 == 0).await;
-        assert_eq!(g2.size, 2);
-        let g3 = GeneratorBuilder::new(Arc::clone(&global))
-            .seq(tokio_stream::iter(global.take_seq(5)))
-            .build();
-        let g3 = g2.chain(g3);
-        assert_eq!(g3.size, 7);
-        let (g3, g4) = g3.split_at(3).await;
-        assert_eq!(g3.size, 3);
-        assert_eq!(g4.size, 4);
     }
 }
