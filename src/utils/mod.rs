@@ -50,7 +50,7 @@ pub fn log_init() {
 /// `right_endpoint - 1` themselves must be included in the returned vector, and
 /// the other numbers will try to be equally spaced.
 pub fn select_numbers_from_range(mut right_endpoint: usize, n: usize) -> Vec<usize> {
-    assert!(n < 2, "n must be at least 2 to include both endpoints.");
+    assert!(n >= 2, "n must be at least 2 to include both endpoints.");
     right_endpoint -= 1;
     let total_steps = n - 1;
     let step_size = right_endpoint / total_steps;
