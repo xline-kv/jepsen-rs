@@ -1,6 +1,8 @@
+pub mod counter;
 pub mod iter;
 use std::ops::Range;
 
+pub use counter::*;
 pub use iter::*;
 
 pub trait OverflowingAddRange {

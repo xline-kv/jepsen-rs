@@ -1,5 +1,9 @@
-use std::pin::Pin;
+use std::{
+    fmt::{self, Debug},
+    pin::Pin,
+};
 
+use log::trace;
 use tokio_stream::{Stream, StreamExt};
 
 /// The extra methods on async iterators (Stream).
@@ -31,14 +35,38 @@ pub trait AsyncIter {
     type Item;
     async fn next(&mut self) -> Option<Self::Item>;
     async fn next_with_id(&mut self) -> Option<(Self::Item, u64)>;
+}
+
+/// A trait for generator, which allows to get next op and delay strategy
+/// separately, without actually wait the delay.
+#[async_trait::async_trait]
+pub trait DelayAsyncIter: AsyncIter {
+    type DelayType;
+    /// Get next op and delay type without delay.
+    async fn get_without_delay(&mut self) -> Option<(Self::Item, Self::DelayType)>;
+    /// Collect items only without delay.
     async fn collect(mut self) -> Vec<Self::Item>
     where
         Self: Send + Sized,
-        Self::Item: Send,
+        Self::Item: Send + Debug,
     {
         let mut items = Vec::new();
-        while let Some(item) = self.next().await {
+        while let Some((item, _delay)) = self.get_without_delay().await {
+            trace!("generator yields {:?}", item);
             items.push(item);
+        }
+        items
+    }
+    /// Collect (item, delay)
+    async fn collect_all(mut self) -> Vec<(Self::Item, Self::DelayType)>
+    where
+        Self: Send + Sized,
+        Self::Item: Send,
+        Self::DelayType: Send,
+    {
+        let mut items = Vec::new();
+        while let Some(x) = self.get_without_delay().await {
+            items.push(x);
         }
         items
     }

@@ -51,7 +51,7 @@ pub enum GeneratorGroupStrategy {
 
 impl Default for GeneratorGroupStrategy {
     fn default() -> Self {
-        Self::RoundRobin(usize::MAX)
+        Self::RoundRobin(0)
     }
 }
 
