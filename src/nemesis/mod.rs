@@ -1,3 +1,5 @@
+pub mod register;
+
 use std::collections::HashSet;
 
 use madsim::rand::Rng;
@@ -28,7 +30,7 @@ pub enum SerializableNemesisType {
 }
 
 #[non_exhaustive]
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum NemesisType {
     #[default]
     Noop,
