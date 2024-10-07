@@ -1,5 +1,5 @@
 use std::{
-    fmt::{self, Debug},
+    fmt::{Debug},
     pin::Pin,
 };
 

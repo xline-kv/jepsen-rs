@@ -3,7 +3,7 @@ pub mod controller;
 pub mod elle_rw;
 #[cfg(test)]
 use std::ops::{AddAssign, RangeFrom};
-use std::{collections::VecDeque, fmt, pin::Pin, sync::Arc};
+use std::{fmt, pin::Pin, sync::Arc};
 
 use context::GeneratorId;
 pub use context::Global;
@@ -21,7 +21,7 @@ use crate::{
 /// The content of a generator, a tuple of [`Op`] and [`DelayStrategy`].
 pub type GeneratorContent<U> = (U, DelayStrategy);
 
-/// Cache size for the generator.
+/// Cache size for the raw generator.
 pub const GENERATOR_CACHE_SIZE: usize = 200;
 
 /// This trait is for the raw generator (clojure generator), which will only
@@ -58,13 +58,16 @@ impl RawGenerator for RangeFrom<i32> {
 
 /// The builder of generator.
 pub struct GeneratorBuilder<'a, U: Send + fmt::Debug = Op, ERR: Send + 'a = ErrorType> {
+    /// A reference to the global context
     global: Arc<Global<'a, U, ERR>>,
     /// user provided sequence
     raw_seq: Option<Box<dyn Stream<Item = U> + Send + Unpin + 'a>>,
-    /// seq which is gotten from other generators
+    /// seq which is gotten from other generators. The wrapped_seq is the
+    /// combination of `raw_seq` and `delay_strategy` seq.
     wrapped_seq: Option<Pin<Box<dyn Stream<Item = GeneratorContent<U>> + Send + 'a>>>,
     /// user provided delay strategy for all elements of this generator
     delay_strategy_one: Option<DelayStrategy>,
+    /// generator id. If not provided, a new id will be generated
     id: Option<GeneratorId>,
 }
 
@@ -142,10 +145,10 @@ impl<'a, U: Send + fmt::Debug + 'a, ERR: 'a + Send> GeneratorBuilder<'a, U, ERR>
     }
 }
 
-/// The generator. Each generator is a Op sequence with a same size sequence of
-/// [`DelayStrategy`]s. When generating each Op, the generator will take an
-/// element from both the sequence and the [`DelayStrategy`] sequence, returns
-/// the [`Op`] after delay for the corresponding [`DelayStrategy`].
+/// The generator. Each generator is a sequence of each the combination of Op
+/// and [`DelayStrategy`]. When generating each Op (calling `next`), the
+/// generator will take an element, returns the [`Op`] after delaying for the
+/// corresponding [`DelayStrategy`].
 pub struct Generator<'a, U: Send + fmt::Debug = Op, ERR: Send + 'a = ErrorType> {
     /// generator id
     pub id: GeneratorId,
@@ -156,6 +159,7 @@ pub struct Generator<'a, U: Send + fmt::Debug = Op, ERR: Send + 'a = ErrorType> 
 }
 
 impl<'a, U: Send + fmt::Debug + 'a, ERR: 'a + Send> Generator<'a, U, ERR> {
+    /// Create an empty generator
     pub fn empty(global: Arc<Global<'a, U, ERR>>) -> Self {
         GeneratorBuilder::new(global)
             .seq(tokio_stream::empty())
@@ -188,7 +192,7 @@ impl<'a, U: Send + fmt::Debug + 'a, ERR: 'a + Send> Generator<'a, U, ERR> {
     /// will keep the rest.
     ///
     /// First generator will keep the generator id, and the second [`Generator`]
-    /// will alloc a new id.
+    /// will alloc for a new id.
     pub async fn split_at(mut self, n: usize) -> (Self, Self) {
         let first_seq = self.seq.as_mut().split_at(n).await;
         (
@@ -209,11 +213,6 @@ impl<'a, U: Send + fmt::Debug + 'a, ERR: 'a + Send> Generator<'a, U, ERR> {
             .id(self.id)
             .wrapped_seq(out_seq)
             .build()
-    }
-
-    /// Collect the generator into a vector, without [`DelayStrategy`].
-    pub async fn collect(self) -> Vec<U> {
-        self.seq.map(|x| x.0).collect().await
     }
 }
 
@@ -245,9 +244,12 @@ impl<'a, ERR: 'a + Send, U: Send + fmt::Debug + 'a> DelayAsyncIter for Generator
     }
 }
 
+/// Generator with its ratio. The [`Counter`] indicates how many generations
+/// left until the next generator exchange event.
 pub type GeneratorGroupContent<'a, U, ERR> = (Generator<'a, U, ERR>, Counter);
 
-/// A group of generators.
+/// A group of generators. It provides the flexibility to combine multiple
+/// generators into one.
 #[derive(Default)]
 pub struct GeneratorGroup<'a, U: Send + fmt::Debug = Op, ERR: 'a + Send = ErrorType> {
     /// stores all generators and its ratio.
@@ -342,6 +344,10 @@ impl<'a, ERR: 'a + Send, U: Send + fmt::Debug + 'a> GeneratorGroup<'a, U, ERR> {
 
     /// Convert a [`GeneratorGroup`] to a [`Generator`]. The delay_strategy of
     /// the [`Generator`] will be kept.
+    ///
+    /// This method is mainly used for combining multiple [`GeneratorGroup`]s
+    /// together. If you want to combine multiple [`GeneratorGroup`]s together,
+    /// you need to convert them to [`Generator`]s first.
     pub async fn to_generator(self) -> Generator<'a, U, ERR> {
         assert!(!self.gens.is_empty(), "group should not be empty");
         let global = self.current().0.global.clone();
