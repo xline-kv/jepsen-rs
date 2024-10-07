@@ -307,11 +307,16 @@ impl<'a, ERR: 'a + Send, U: Send + fmt::Debug + 'a> GeneratorGroup<'a, U, ERR> {
     pub fn remove_current_and_reselect(&mut self) -> GeneratorGroupContent<'a, U, ERR> {
         let is_last = self.selected == self.gens.len() - 1;
         let ret = self.remove_generator(self.selected);
+        // do not select when the group is empty.
+        if self.gens.is_empty() {
+            return ret;
+        }
         // If strategy is round-robin or chain, it's no need to choose a new
-        // one.
-        if is_last
-            || (matches!(self.strategy, GeneratorGroupStrategy::Random) && !self.gens.is_empty())
-        {
+        // one. The `self.selected` will automatically point to the next one.
+
+        // But if the `self.selected` is the last, we must select a new one, otherwise
+        // there will be a stack overflow.
+        if is_last || matches!(self.strategy, GeneratorGroupStrategy::Random) {
             self.select_current();
         }
         ret
