@@ -166,6 +166,13 @@ impl<'a, U: Send + fmt::Debug + 'a, ERR: 'a + Send> Generator<'a, U, ERR> {
             .build()
     }
 
+    /// Create a generator with a single element
+    pub fn once(global: Arc<Global<'a, U, ERR>>, u: U) -> Self {
+        GeneratorBuilder::new(global)
+            .seq(tokio_stream::iter(std::iter::once(u)))
+            .build()
+    }
+
     pub fn map(self, f: impl Fn(U) -> U + Send + 'a) -> Self {
         GeneratorBuilder::new(self.global)
             .id(self.id)
