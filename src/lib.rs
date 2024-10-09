@@ -3,7 +3,6 @@
 mod checker;
 mod generator;
 mod history;
-mod jtests;
 mod op;
 pub mod utils;
 
@@ -131,8 +130,7 @@ impl Default for CljCore {
 
 #[cfg(test)]
 mod test {
-    use j4rs::JvmBuilder;
-    use utils::{pre_serialize, J4rsDie};
+    use utils::pre_serialize;
 
     use self::utils::print_clj;
     use super::*;
