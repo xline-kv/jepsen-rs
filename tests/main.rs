@@ -58,7 +58,7 @@ pub fn intergration_test() -> Result<()> {
         let g2 = client.new_generator(50);
         let g3 = client.new_generator(50);
         info!("intergration_test: generators created");
-        let gen_g = GeneratorGroup::new([g1, g2, g3])
+        let gen_g = GeneratorGroup::new_from_generator(client.global.clone(), [g1, g2, g3])
             .with_strategy(GeneratorGroupStrategy::RoundRobin(usize::MAX));
         info!("generator group created");
         let res = client.run(gen_g).await.unwrap_or_else(|e| panic!("{}", e));

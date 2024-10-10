@@ -1,7 +1,4 @@
-use std::{
-    fmt::{Debug},
-    pin::Pin,
-};
+use std::{fmt::Debug, pin::Pin};
 
 use log::trace;
 use tokio_stream::{Stream, StreamExt};
@@ -33,8 +30,11 @@ impl<S: ?Sized + Stream> ExtraStreamExt for S {}
 #[async_trait::async_trait]
 pub trait AsyncIter {
     type Item;
+    fn id(&self) -> u64;
     async fn next(&mut self) -> Option<Self::Item>;
-    async fn next_with_id(&mut self) -> Option<(Self::Item, u64)>;
+    async fn next_with_id(&mut self) -> Option<(Self::Item, u64)> {
+        self.next().await.map(|x| (x, self.id()))
+    }
 }
 
 /// A trait for generator, which allows to get next op and delay strategy
