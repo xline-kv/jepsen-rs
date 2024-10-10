@@ -34,7 +34,7 @@ mod test {
             controller::GeneratorGroupStrategy, GeneratorBuilder, GeneratorGroup, Global,
             RawGenerator,
         },
-        nemesis::Nemesis,
+        nemesis::NemesisCalculator,
         utils::{DelayAsyncIter, OverflowingAddRange},
     };
 
