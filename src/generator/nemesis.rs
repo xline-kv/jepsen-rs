@@ -1,18 +1,24 @@
 use std::fmt;
 
 use super::Generator;
-use crate::{nemesis::NemesisType, op::Op};
+use crate::{
+    nemesis::{NemesisRecord, NemesisType},
+    op::Op,
+};
 
 /// A union of [`NemesisType`] and [`Op`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NemesisOrOp {
-    Nemesis(NemesisType),
+    /// Generate nemesis
+    NemesisType(NemesisType),
+    /// Recover nemesis
+    NemesisRecord(NemesisRecord),
     Op(Op),
 }
 
 impl From<NemesisType> for NemesisOrOp {
     fn from(nemesis_type: NemesisType) -> Self {
-        Self::Nemesis(nemesis_type)
+        Self::NemesisType(nemesis_type)
     }
 }
 
@@ -75,7 +81,7 @@ mod test {
             ]
             .map(NemesisOrOp::Op)
             .to_vec()
-            .tap_mut(|ops| ops.push(NemesisOrOp::Nemesis(NemesisType::SplitOne(1))))
+            .tap_mut(|ops| ops.push(NemesisOrOp::NemesisType(NemesisType::SplitOne(1))))
         );
     }
 }
