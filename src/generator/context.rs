@@ -1,78 +1,54 @@
 use std::{
-    collections::BTreeMap,
+    collections::BTreeSet,
     sync::{Arc, Mutex},
 };
 
-use madsim::{runtime::NodeHandle, time};
+use madsim::time;
 
-use super::GeneratorId;
-use crate::{generator::RawGenerator, history::SerializableHistoryList};
+use super::RawGenerator;
+use crate::{
+    history::{ErrorType, SerializableHistoryList},
+    op::{Op, OpFunctionType},
+};
+
+type IdSetType = Arc<Mutex<BTreeSet<u64>>>;
 
 /// The global context
 #[non_exhaustive]
-pub struct Global {
-    /// The thread pool
-    pub thread_pool: Mutex<BTreeMap<GeneratorId, NodeHandle>>,
+pub struct Global<'a, T: Send = Op, ERR: Send = ErrorType> {
+    /// The id allocator and handle pool.
+    /// This is like a dispatcher, when an [`Op`] generated, it will be sent to
+    /// the corresponding sender, aka a madsim thread. This thread will try
+    /// to receive the `Op` and execute it.
+    pub id_set: IdSetType,
     /// The original raw generator
-    pub gen: Arc<dyn RawGenerator>,
+    pub gen: Mutex<Option<Box<dyn RawGenerator<Item = T> + Send + 'a>>>,
     /// The start time of the simulation
     pub start_time: time::Instant,
     /// The history list
-    pub history: Mutex<SerializableHistoryList>,
+    pub history: Mutex<SerializableHistoryList<OpFunctionType, ERR>>,
 }
 
-impl Global {
+impl<'a, T: Send + 'a, ERR: Send> Global<'a, T, ERR> {
     /// Create a new global context
-    pub fn new(gen: Arc<dyn RawGenerator>) -> Self {
+    pub fn new(gen: impl RawGenerator<Item = T> + Send + 'a) -> Self {
+        let h: SerializableHistoryList<OpFunctionType, ERR> = Default::default();
         Self {
-            thread_pool: Mutex::new(BTreeMap::new()),
-            gen,
+            id_set: Mutex::new(BTreeSet::new()).into(),
+            gen: Mutex::new(Some(
+                Box::new(gen) as Box<dyn RawGenerator<Item = T> + Send + 'a>
+            )),
             start_time: time::Instant::now(),
-            history: Mutex::new(SerializableHistoryList::default()),
+            history: Mutex::new(h),
         }
     }
-    /// Find the minimal usable id in the thread pool
-    pub fn get_next_id(&self) -> GeneratorId {
-        let pool = self.thread_pool.lock().expect("Failed to lock thread pool");
-        for (index, id) in pool.keys().enumerate() {
-            if index as u64 != *id {
-                return index as u64;
-            }
+
+    /// Take the next `n` ops from the raw generator.
+    pub fn take_seq(&self, n: usize) -> Vec<T> {
+        if let Some(gen) = self.gen.lock().expect("Failed to lock gen").as_mut() {
+            gen.gen_n(n)
+        } else {
+            Vec::new()
         }
-        pool.len() as u64
-    }
-    /// Allocate a new generator
-    pub fn alloc_new_generator(&self, handle: NodeHandle) -> GeneratorId {
-        let id = self.get_next_id();
-        self.thread_pool
-            .lock()
-            .expect("Failed to lock thread pool")
-            .insert(id, handle);
-        id
-    }
-    /// Free the generator
-    pub fn free_generator(&self, id: GeneratorId) {
-        self.thread_pool
-            .lock()
-            .expect("Failed to lock thread pool")
-            .remove(&id);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-
-    use super::*;
-    use crate::generator::elle_rw::ElleRwGenerator;
-
-    #[test]
-    fn test_alloc_and_free_generator() {
-        let rt = madsim::runtime::Runtime::new();
-        let gen = Global::new(Arc::new(ElleRwGenerator::new().unwrap()));
-        assert_eq!(gen.alloc_new_generator(rt.create_node().build()), 0);
-        assert_eq!(gen.alloc_new_generator(rt.create_node().build()), 1);
-        assert_eq!(gen.alloc_new_generator(rt.create_node().build()), 2);
-        gen.free_generator(1);
-        assert_eq!(gen.alloc_new_generator(rt.create_node().build()), 1);
     }
 }
