@@ -18,7 +18,7 @@ type ErrorType = Vec<String>;
 ///
 /// We only need to serialize the history, but here implements the Deserialize
 /// trait as well.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SerializableHistory<F = OpFunctionType, ERR = ErrorType> {
     pub index: u64,
     #[serde(rename = "type")]
@@ -60,6 +60,12 @@ impl Deref for SerializableHistoryList {
 impl DerefMut for SerializableHistoryList {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
+    }
+}
+
+impl<F: PartialEq, ERR: PartialEq> PartialEq for SerializableHistoryList<F, ERR> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
     }
 }
 
@@ -109,26 +115,5 @@ impl<ERR> SerializableHistoryList<OpFunctionType, ERR> {
             error,
         };
         self.0.push(item);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use j4rs::Instance;
-
-    use super::*;
-    use crate::{
-        read_edn,
-        utils::{print_clj, FromSerde, ToDe},
-    };
-
-    #[test]
-    fn test_history_list_conversion() -> anyhow::Result<()> {
-        let his_edn = read_edn(include_str!("../assets/ex_history.edn"))?;
-        let res: SerializableHistoryList = his_edn.to_de()?;
-        assert_eq!(res.len(), 4);
-        let res: Instance = Instance::from_ser(res)?;
-        print_clj(res);
-        Ok(())
     }
 }

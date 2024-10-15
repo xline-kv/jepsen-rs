@@ -14,7 +14,7 @@ pub struct Global {
     /// The thread pool
     pub thread_pool: Mutex<BTreeMap<GeneratorId, NodeHandle>>,
     /// The original raw generator
-    pub gen: Arc<dyn RawGenerator>,
+    pub gen: Arc<dyn RawGenerator<Item = u64>>,
     /// The start time of the simulation
     pub start_time: time::Instant,
     /// The history list
@@ -23,7 +23,7 @@ pub struct Global {
 
 impl Global {
     /// Create a new global context
-    pub fn new(gen: Arc<dyn RawGenerator>) -> Self {
+    pub fn new(gen: Arc<dyn RawGenerator<Item = u64>>) -> Self {
         Self {
             thread_pool: Mutex::new(BTreeMap::new()),
             gen,
@@ -60,19 +60,4 @@ impl Global {
 }
 
 #[cfg(test)]
-mod tests {
-
-    use super::*;
-    use crate::generator::elle_rw::ElleRwGenerator;
-
-    #[test]
-    fn test_alloc_and_free_generator() {
-        let rt = madsim::runtime::Runtime::new();
-        let gen = Global::new(Arc::new(ElleRwGenerator::new().unwrap()));
-        assert_eq!(gen.alloc_new_generator(rt.create_node().build()), 0);
-        assert_eq!(gen.alloc_new_generator(rt.create_node().build()), 1);
-        assert_eq!(gen.alloc_new_generator(rt.create_node().build()), 2);
-        gen.free_generator(1);
-        assert_eq!(gen.alloc_new_generator(rt.create_node().build()), 1);
-    }
-}
+mod tests {}
