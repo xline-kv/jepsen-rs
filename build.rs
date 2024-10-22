@@ -17,15 +17,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Top level dependencies:
     // * jepsen 0.3.5
     // * elle 0.2.1
-    // * data.json 2.5.0
+    // * cheshire/cheshire "5.11.0"
     let artifacts = [
+        "org.clojure:clojure:1.12.0",
         "elle:elle:0.2.1",
         "com.aphyr:bifurcan-clj:0.1.1",
         "dom-top:dom-top:1.0.9",
         "riddley:riddley:0.2.0",
         "rhizome:rhizome:0.2.9",
         "jepsen:jepsen:0.3.5",
-        "org.clojure:data.json:2.5.0",
         "byte-streams:byte-streams:0.2.5-alpha2",
         "clj-tuple:clj-tuple:0.2.2",
         "manifold:manifold:0.1.8",
@@ -123,6 +123,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "org.clojure:spec.alpha:0.3.218",
         "org.nrepl:incomplete:0.1.0",
         "org/clojure:pom.contrib:0.2.2",
+        // cheshire
+        "cheshire:cheshire:5.11.0",
+        "org.clojure:core.specs.alpha:0.4.74",
+        "org.clojure:spec.alpha:0.5.238",
+        "org.clojure:pom.contrib:1.2.0",
+        "com.fasterxml.jackson.dataformat:jackson-dataformat-smile:2.13.3",
+        "com.fasterxml.jackson.core:jackson-core:2.13.3",
+        "com.fasterxml.jackson.dataformat:jackson-dataformat-cbor:2.13.3",
+        "tigris:tigris:0.1.2",
+        "com.fasterxml.jackson.dataformat:jackson-dataformats-binary:2.13.3",
+        "com.fasterxml.jackson:jackson-base:2.13.3",
+        "com.fasterxml.jackson:jackson-bom:2.13.3",
+        "com.fasterxml.jackson:jackson-parent:2.13",
+        "com.fasterxml.oss-parent:43",
     ];
 
     for artifact in artifacts {

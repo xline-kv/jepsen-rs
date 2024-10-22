@@ -1,10 +1,18 @@
+//! jepsen-rs is a binding to [jepsen](https://github.com/jepsen-io/jepsen),
+//! and more, a jepsen test suit for rust deterministic simulation testing.
+//!
 //! NOTE: Requires java 21 due to https://github.com/jepsen-io/jepsen/issues/585
 
-mod checker;
-mod generator;
-mod history;
-mod jtests;
-mod op;
+// for intergration into Xline
+#![warn(clippy::cargo)]
+// madsim rewrite the tokio crate, but it's old and its dependencies are not
+// compatible with other crate.
+#![allow(clippy::multiple_crate_versions)]
+
+pub mod ffi;
+pub mod generator;
+pub mod history;
+pub mod op;
 pub mod utils;
 
 use std::{borrow::Borrow, cell::OnceCell};
@@ -38,10 +46,6 @@ where
         });
         f(jvm)
     })
-}
-
-pub fn read_edn(arg: &str) -> j4rs::errors::Result<Instance> {
-    with_jvm(|_| cljinvoke!("load-string", arg))
 }
 
 fn invoke_clojure_java_api(
@@ -114,6 +118,7 @@ pub static CLOJURE: CljCore = CljCore { ns: "clojure.core" };
 
 impl CljCore {
     pub fn require(&self, ns: &str) -> j4rs::errors::Result<CljNs> {
+        init_jvm();
         CljNs::var_inner(self.ns, "require")?.invoke1(cljinvoke_java_api!("read", ns)?)?;
         Ok(CljNs { ns: ns.to_string() })
     }
@@ -126,60 +131,5 @@ impl CljCore {
 impl Default for CljCore {
     fn default() -> Self {
         CLOJURE.clone()
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use j4rs::JvmBuilder;
-    use utils::{pre_serialize, J4rsDie};
-
-    use self::utils::print_clj;
-    use super::*;
-    use crate::utils::print;
-
-    #[test]
-    fn test_elle_check() -> Result<(), Box<dyn std::error::Error>> {
-        init_jvm();
-        let r = CLOJURE.require("elle.rw-register")?;
-        let h = CLOJURE.require("jepsen.history")?;
-        let history = read_edn(include_str!("../assets/ex_history.edn"))?;
-        let history = nsinvoke!(h, "history", history)?;
-        let res = nsinvoke!(r, "check", history)?;
-        print_clj(res);
-        Ok(())
-    }
-
-    #[test]
-    fn test_elle_gen() -> Result<(), Box<dyn std::error::Error>> {
-        init_jvm();
-        let r = CLOJURE.require("elle.rw-register")?;
-        let gen = nsinvoke!(r, "gen")?;
-        let take = cljinvoke!("take", 5, gen)?;
-        let value = pre_serialize(take)?;
-        print_clj(value);
-        Ok(())
-    }
-
-    #[test]
-    fn elle_gen_analysis() -> Result<(), Box<dyn std::error::Error>> {
-        init_jvm();
-        let r = CLOJURE.require("elle.rw-register")?;
-        let h = CLOJURE.require("jepsen.history")?;
-        let gen = r.var("gen")?.invoke0()?;
-        let history = cljinvoke!("take", 10, gen)?;
-        let res = nsinvoke!(r, "check", nsinvoke!(h, "history", history)?)?;
-        print(res);
-        Ok(())
-    }
-
-    /// We can define a function in namespace, and call it later.
-    #[test]
-    fn test_defn_in_ns() -> Result<(), Box<dyn std::error::Error>> {
-        init_jvm();
-        let _x = cljeval!((defn test [] (str "hello" "world")))?;
-        let y = cljeval!((test))?;
-        print_clj(y);
-        Ok(())
     }
 }
