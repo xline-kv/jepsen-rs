@@ -9,7 +9,9 @@ use madsim::runtime::NodeHandle;
 
 use crate::{
     checker::{elle_rw::ElleRwChecker, Check, CheckOption, SerializableCheckResult},
-    generator::{Generator, GeneratorBuilder, GeneratorIter, Global, RawGenerator},
+    generator::{
+        context::HistoryProcess, Generator, GeneratorBuilder, GeneratorIter, Global, RawGenerator,
+    },
     history::HistoryType,
     nemesis::{
         implementation::{NemesisCalculator, NemesisCluster, NemesisExecutor},
@@ -173,7 +175,7 @@ impl<EC: ElleRwClusterClient + NemesisClusterClient + Send + Sync + 'static> Cli
             OpOrNemesis::Nemesis(n) =>
             // TODO: use `get_or_init` when async clojure stablized
             {
-                let n = match n {
+                let nemesis_type = match n {
                     AllNemesis::Execute(n) => n,
                     AllNemesis::Recover(_) => {
                         // TODO: remove recover type in AllNemesis
@@ -182,17 +184,22 @@ impl<EC: ElleRwClusterClient + NemesisClusterClient + Send + Sync + 'static> Cli
                 };
                 loop {
                     if self.all_handles.get().is_some() {
-                        let calced = self.calculate_nemesis(n).await;
+                        let calced = self.calculate_nemesis(nemesis_type.clone()).await;
                         let (exec, recov) = self.n_register.lock().unwrap().put(calced);
                         if let Some(recov) = recov {
                             if exec == recov {
                                 break;
                             } else {
-                                self.recover_rec(recov).await;
+                                // recover first, then execute
+                                self.recover_rec(recov.clone()).await;
+                                self.global.push_nemesis(recov.into());
                                 self.execute_rec(exec).await;
+                                self.global.push_nemesis(nemesis_type.into());
                             }
                         } else {
-                            self.execute_rec(exec).await;
+                            // execute only
+                            self.execute_rec(exec.clone()).await;
+                            self.global.push_nemesis(nemesis_type.into());
                         }
                         break;
                     } else {

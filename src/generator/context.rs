@@ -7,8 +7,9 @@ use madsim::time;
 
 use super::RawGenerator;
 use crate::{
-    history::{ErrorType, HistoryValue, SerializableHistoryList},
-    op::{Op, OpOrNemesisFuncType},
+    history::{ErrorType, HistoryType, HistoryValue, SerializableHistoryList},
+    nemesis::AllNemesis,
+    op::{nemesis::OpOrNemesis, Op, OpOrNemesisFuncType},
 };
 
 type IdSetType = Arc<Mutex<BTreeSet<u64>>>;
@@ -120,6 +121,42 @@ impl<'a, T: Send + 'a, ERR: Send> Global<'a, T, ERR> {
         } else {
             Vec::new()
         }
+    }
+}
+
+/// helper functions to operate history in global, simplify the use case
+pub trait HistoryProcess {
+    type ERR: Send;
+    fn push_invoke(&self, process: u64, value: Op);
+    fn push_result(
+        &self,
+        process: u64,
+        result_type: HistoryType,
+        value: Op,
+        error: Option<Self::ERR>,
+    );
+    fn push_nemesis(&self, value: AllNemesis);
+}
+
+impl<'a, ERR: Send> HistoryProcess for Arc<Global<'a, OpOrNemesis, ERR>> {
+    type ERR = ERR;
+    fn push_invoke(&self, process: u64, value: Op) {
+        self.history
+            .lock()
+            .expect("Failed to lock history")
+            .push_invoke(self, process, value);
+    }
+    fn push_result(&self, process: u64, result_type: HistoryType, value: Op, error: Option<ERR>) {
+        self.history
+            .lock()
+            .expect("Failed to lock history")
+            .push_result(self, process, result_type, value, error);
+    }
+    fn push_nemesis(&self, value: AllNemesis) {
+        self.history
+            .lock()
+            .expect("Failed to lock history")
+            .push_nemesis(self, value);
     }
 }
 

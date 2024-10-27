@@ -185,7 +185,7 @@ impl<T: Checker> Check for T {
         std::fs::create_dir_all(output.parent().unwrap()).unwrap();
         let h_arg = [InvocationArg::from(h)];
         let s = CLOJURE.var("pr-str")?.invoke(&h_arg)?;
-        std::fs::write(&output, java_to_string(&s)?)?;
+        std::fs::write(&output, java_to_string(&s)?.replace("{:", "\n{:"))?;
         info!("history saved to `{}`", output.display());
 
         // check
