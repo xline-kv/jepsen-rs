@@ -1,11 +1,10 @@
 use std::{
     fmt,
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Mutex},
 };
 
 use anyhow::Result;
 use log::{debug, info, trace};
-use madsim::runtime::NodeHandle;
 
 use crate::{
     checker::{elle_rw::ElleRwChecker, Check, CheckOption, SerializableCheckResult},
@@ -15,8 +14,8 @@ use crate::{
     history::HistoryType,
     nemesis::{
         implementation::{NemesisCalculator, NemesisCluster, NemesisExecutor},
-        register::NemesisRegister,
-        AllNemesis, NemesisType, ServerId,
+        register::{NemesisRegister, NemesisRegisterStrategy},
+        AllNemesis, NemesisType,
     },
     op::{nemesis::OpOrNemesis, Op},
 };
@@ -28,21 +27,6 @@ pub trait ElleRwClusterClient {
     async fn get(&self, key: u64) -> std::result::Result<Option<u64>, String>;
     async fn put(&self, key: u64, value: u64) -> std::result::Result<(), String>;
     async fn txn(&self, ops: Vec<Op>) -> std::result::Result<Vec<Op>, String>;
-}
-
-/// The trait for a client that could handle nemesis operations.
-///
-/// If you want to use nemesis in the test, you need to implement this
-/// function.
-///
-/// If you don't use nemesis, just make it `unimplemented!()`.
-#[async_trait::async_trait]
-pub trait NemesisClusterClient {
-    /// The Client needs to get all `NodeHandle`s of the cluster, so that it can
-    /// kill, pause and clog net of the cluster node.
-    async fn get_all_nodes_handle(&self) -> Vec<NodeHandle>;
-    async fn get_leader_without_term(&self) -> ServerId;
-    fn size(&self) -> usize;
 }
 
 /// The interface of a jepsen client.
@@ -65,24 +49,44 @@ pub trait Client<U: Send + fmt::Debug = OpOrNemesis> {
 
 /// A client that leads the jepsen test, execute between the generator and the
 /// cluster, and record the history file.
-pub struct JepsenClient<EC: ElleRwClusterClient + NemesisClusterClient + Send + Sync + 'static> {
+pub struct JepsenClient<EC: ElleRwClusterClient + Send + Sync + 'static> {
+    /// A cluster client to put/get the op
     cluster_client: EC,
+    /// A global context to record history
     pub global: Arc<Global<'static, OpOrNemesis, <Self as Client>::ERR>>,
-    pub all_handles: OnceLock<Vec<NodeHandle>>,
+    /// A nemesis register to recover the nemeses
     pub n_register: Mutex<NemesisRegister>,
+    /// A nemesis cluster to execute the nemeses. Currently this is the complete
+    /// `XlineGroup`.
+    nemesis_cluster: Arc<dyn NemesisCluster + Send + Sync>,
 }
 
-impl<EC: ElleRwClusterClient + NemesisClusterClient + Send + Sync + 'static> JepsenClient<EC> {
+impl<EC: ElleRwClusterClient + Send + Sync + 'static> JepsenClient<EC> {
+    /// Create a Jepsen client.
+    ///
+    /// # Arguments
+    ///
+    /// * `cluster` - a Arc of a cluster, to execute nemeses and get some
+    ///   information.
+    /// * `cluster_client` - a cluster client to put/get/txn with the op
+    /// * `raw_gen` - a RawGenerator to build generators.
     pub fn new(
-        cluster: EC,
+        cluster: Arc<dyn NemesisCluster + Send + Sync>,
+        cluster_client: EC,
         raw_gen: impl RawGenerator<Item = OpOrNemesis> + Send + 'static,
     ) -> Self {
         Self {
-            cluster_client: cluster,
+            nemesis_cluster: cluster,
+            cluster_client,
             global: Arc::new(Global::new(raw_gen)),
-            all_handles: OnceLock::new(),
             n_register: NemesisRegister::default().into(),
         }
+    }
+
+    /// Set nemesis register strategy.
+    pub fn with_n_register_strategy(self, strategy: NemesisRegisterStrategy) -> Self {
+        self.n_register.lock().unwrap().set_strategy(strategy);
+        self
     }
 
     /// Recursively handle an op, return the result.
@@ -104,9 +108,7 @@ impl<EC: ElleRwClusterClient + NemesisClusterClient + Send + Sync + 'static> Jep
 }
 
 #[async_trait::async_trait]
-impl<EC: ElleRwClusterClient + NemesisClusterClient + Send + Sync + 'static> Client<OpOrNemesis>
-    for JepsenClient<EC>
-{
+impl<EC: ElleRwClusterClient + Send + Sync + 'static> Client<OpOrNemesis> for JepsenClient<EC> {
     type ERR = String;
 
     /// take n Ops from Global [`RawGenerator`].
@@ -182,34 +184,23 @@ impl<EC: ElleRwClusterClient + NemesisClusterClient + Send + Sync + 'static> Cli
                         panic!("generated nemesis should not be a recover operation")
                     }
                 };
-                loop {
-                    if self.all_handles.get().is_some() {
-                        let calced = self.calculate_nemesis(nemesis_type.clone()).await;
-                        let (exec, recov) = self.n_register.lock().unwrap().put(calced);
-                        if let Some(recov) = recov {
-                            if exec == recov {
-                                break;
-                            } else {
-                                // recover first, then execute
-                                self.recover_rec(recov.clone()).await;
-                                self.global.push_nemesis(recov.into());
-                                self.execute_rec(exec).await;
-                                self.global.push_nemesis(nemesis_type.into());
-                            }
-                        } else {
-                            // execute only
-                            self.execute_rec(exec.clone()).await;
-                            self.global.push_nemesis(nemesis_type.into());
-                        }
-                        break;
-                    } else {
-                        self.all_handles
-                            .set(self.cluster_client.get_all_nodes_handle().await)
-                            // The Result cannot be directly unwrapped because `NodeHandle` is
-                            // !Debug
-                            .map_err(|_| "set all nodes handle failed")
-                            .unwrap();
+                let calced = self
+                    .nemesis_cluster
+                    .calculate_nemesis(nemesis_type.clone())
+                    .await;
+                let (exec, recov) = self.n_register.lock().unwrap().put(calced);
+                if let Some(recov) = recov {
+                    if exec != recov {
+                        // recover first, then execute
+                        self.nemesis_cluster.recover_rec(recov.clone()).await;
+                        self.global.push_nemesis(recov.into());
+                        self.nemesis_cluster.execute_rec(exec).await;
+                        self.global.push_nemesis(nemesis_type.into());
                     }
+                } else {
+                    // execute only
+                    self.nemesis_cluster.execute_rec(exec.clone()).await;
+                    self.global.push_nemesis(nemesis_type.into());
                 }
             }
         }
@@ -234,73 +225,5 @@ impl<EC: ElleRwClusterClient + NemesisClusterClient + Send + Sync + 'static> Cli
         let check_result = ElleRwChecker::default()
             .check(&self.global.history.lock().unwrap(), CheckOption::default());
         check_result.map_err(|err| err.to_string())
-    }
-}
-
-/// The [`NemesisCluster`] trait implementation for [`JepsenClient`], use the
-/// all `NodeHandle`s.
-#[async_trait::async_trait]
-impl<EC: ElleRwClusterClient + NemesisClusterClient + Send + Sync + 'static> NemesisCluster
-    for JepsenClient<EC>
-{
-    async fn kill(&self, servers: &[ServerId]) {
-        let handle = madsim::runtime::Handle::current();
-        for id in servers {
-            handle.kill(id.to_string());
-        }
-    }
-    async fn restart(&self, servers: &[ServerId]) {
-        let handle = madsim::runtime::Handle::current();
-        for id in servers {
-            handle.restart(id.to_string());
-        }
-    }
-    async fn pause(&self, servers: &[ServerId]) {
-        let net = madsim::net::NetSim::current();
-        let handles = self.all_handles.get().expect("handles not found");
-        for id in servers {
-            net.clog_node(handles[*id as usize].id());
-        }
-    }
-    async fn resume(&self, servers: &[ServerId]) {
-        let net = madsim::net::NetSim::current();
-        let handles = self.all_handles.get().expect("handles not found");
-        for id in servers {
-            net.unclog_node(handles[*id as usize].id());
-        }
-    }
-    async fn get_leader_without_term(&self) -> ServerId {
-        self.cluster_client.get_leader_without_term().await
-    }
-    fn clog_link_both(&self, fst: ServerId, snd: ServerId) {
-        debug_assert!(fst < self.size() as u64 && snd < self.size() as u64);
-        let net = madsim::net::NetSim::current();
-        let handles = self.all_handles.get().expect("handles not found");
-        let (i1, i2) = (handles[fst as usize].id(), handles[snd as usize].id());
-        net.clog_link(i1, i2);
-        net.clog_link(i2, i1);
-    }
-    fn unclog_link_both(&self, fst: ServerId, snd: ServerId) {
-        debug_assert!(fst < self.size() as u64 && snd < self.size() as u64);
-        let net = madsim::net::NetSim::current();
-        let handles = self.all_handles.get().expect("handles not found");
-        let (i1, i2) = (handles[fst as usize].id(), handles[snd as usize].id());
-        net.unclog_link(i1, i2);
-        net.unclog_link(i2, i1);
-    }
-    fn clog_link_single(&self, fst: ServerId, snd: ServerId) {
-        debug_assert!(fst < self.size() as u64 && snd < self.size() as u64);
-        let net = madsim::net::NetSim::current();
-        let handles = self.all_handles.get().expect("handles not found");
-        net.clog_link(handles[fst as usize].id(), handles[snd as usize].id());
-    }
-    fn unclog_link_single(&self, fst: ServerId, snd: ServerId) {
-        debug_assert!(fst < self.size() as u64 && snd < self.size() as u64);
-        let net = madsim::net::NetSim::current();
-        let handles = self.all_handles.get().expect("handles not found");
-        net.unclog_link(handles[fst as usize].id(), handles[snd as usize].id());
-    }
-    fn size(&self) -> usize {
-        self.cluster_client.size()
     }
 }

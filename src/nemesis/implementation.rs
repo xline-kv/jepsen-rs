@@ -231,8 +231,8 @@ pub trait NemesisExecutor: NemesisCluster {
     }
 }
 
-impl<T: NemesisCluster> NemesisCalculator for T {}
-impl<T: NemesisCluster> NemesisExecutor for T {}
+impl<T: ?Sized + NemesisCluster> NemesisCalculator for T {}
+impl<T: ?Sized + NemesisCluster> NemesisExecutor for T {}
 
 #[cfg(test)]
 mod tests {

@@ -1,81 +1,77 @@
-use std::{collections::HashMap, sync::Mutex};
+use std::{
+    collections::HashMap,
+    ops::Deref,
+    sync::{Arc, Mutex, RwLock},
+};
 
 use anyhow::Result;
 use jepsen_rs::{
     checker::ValidType,
-    client::{Client, ElleRwClusterClient, JepsenClient, NemesisClusterClient},
+    client::{Client, ElleRwClusterClient, JepsenClient},
     generator::{
         controller::GeneratorGroupStrategy, elle_rw::ElleRwGenerator, GeneratorGroup,
         NemesisRawGenWrapper,
     },
-    nemesis::{NemesisType, ServerId},
+    nemesis::{
+        implementation::NemesisCluster, register::NemesisRegisterStrategy, NemesisType, ServerId,
+    },
     op::{nemesis::OpOrNemesis, Op},
 };
 use log::{info, LevelFilter};
-use madsim::runtime::NodeHandle;
 
 /// Mock cluster
 #[derive(Default)]
 pub struct TestCluster {
     db: Mutex<HashMap<u64, u64>>,
     size: usize,
-    /// In TestCluster, if nemesis_num > quorum, the get/put operation will
+    /// In TestCluster, if false_num > quorum, the get/put operation will
     /// fail.
-    nemesis_num: usize,
-    /// Node Handles for nemeses
-    handles: Vec<NodeHandle>,
+    status: RwLock<Vec<bool>>,
 }
 
 impl TestCluster {
-    /// Create a new TestCluster without NodeHandles.
+    /// Create a new TestCluster.
     pub fn new() -> Self {
-        Self {
-            db: HashMap::new().into(),
-            size: 5,
-            nemesis_num: 0,
-            handles: vec![],
-        }
-    }
-
-    /// Create a new TestCluster with NodeHandles. Used for Nemesis test.
-    pub async fn new_with_handles() -> Self {
         let size = 5;
-        let handle = madsim::runtime::Handle::current();
-        let mut handles = vec![];
-        for x in 0..size {
-            handles.push(
-                handle
-                    .create_node()
-                    .name(x.to_string())
-                    .ip(format!("192.168.1.{}", x + 1).parse().unwrap())
-                    .init(|| async {})
-                    .build(),
-            )
-        }
         Self {
             db: HashMap::new().into(),
             size,
-            nemesis_num: 0,
-            handles,
+            status: RwLock::new(vec![true; size]),
         }
     }
+
     #[inline]
     pub fn quorum(&self) -> usize {
         self.size / 2 + 1
+    }
+
+    #[inline]
+    pub fn nemesis_num(&self) -> usize {
+        self.status.read().unwrap().iter().filter(|x| !**x).count()
+    }
+}
+
+/// The client of TestCluster, to execute get/put/txn operation.
+pub struct TestClient(pub Arc<TestCluster>);
+
+impl Deref for TestClient {
+    type Target = Arc<TestCluster>;
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
 /// Accept a get/put/txn operation.
 #[async_trait::async_trait]
-impl ElleRwClusterClient for TestCluster {
+impl ElleRwClusterClient for TestClient {
     async fn get(&self, key: u64) -> Result<Option<u64>, String> {
-        if self.nemesis_num > self.quorum() {
+        if self.nemesis_num() > self.quorum() {
             return Err("nemesis_num > quorum".to_string());
         }
         Ok(self.db.lock().unwrap().get(&key).cloned())
     }
     async fn put(&self, key: u64, value: u64) -> Result<(), String> {
-        if self.nemesis_num > self.quorum() {
+        if self.nemesis_num() > self.quorum() {
             return Err("nemesis_num > quorum".to_string());
         }
         self.db.lock().unwrap().insert(key, value);
@@ -83,7 +79,7 @@ impl ElleRwClusterClient for TestCluster {
     }
     /// A txn operation should only contains read/write operations.
     async fn txn(&self, mut ops: Vec<Op>) -> Result<Vec<Op>, String> {
-        if self.nemesis_num > self.quorum() {
+        if self.nemesis_num() > self.quorum() {
             return Err("nemesis_num > quorum".to_string());
         }
         let mut lock = self.db.lock().unwrap();
@@ -106,14 +102,39 @@ impl ElleRwClusterClient for TestCluster {
     }
 }
 
+/// Implementation of NemesisCluster. If the nemesis_num > quorum, the get/put
+/// will fail. The kill/restart/pause/resume methods will only record the
+/// nemesis_num (the mock implementation), not truely kill/restart/pause/resume
+/// them.
 #[async_trait::async_trait]
-impl NemesisClusterClient for TestCluster {
-    async fn get_all_nodes_handle(&self) -> Vec<NodeHandle> {
-        self.handles.clone()
+impl NemesisCluster for TestCluster {
+    async fn kill(&self, servers: &[ServerId]) {
+        let mut lock = self.status.write().unwrap();
+        for id in servers {
+            lock[*id as usize] = false;
+        }
+    }
+    async fn restart(&self, servers: &[ServerId]) {
+        let mut lock = self.status.write().unwrap();
+        for id in servers {
+            lock[*id as usize] = true;
+        }
+    }
+    async fn pause(&self, servers: &[ServerId]) {
+        self.kill(servers).await;
+    }
+    async fn resume(&self, servers: &[ServerId]) {
+        self.restart(servers).await;
     }
     async fn get_leader_without_term(&self) -> ServerId {
         0
     }
+
+    // we do not deal with network in mock cluster.
+    fn clog_link_both(&self, _: ServerId, _: ServerId) {}
+    fn unclog_link_both(&self, _: ServerId, _: ServerId) {}
+    fn clog_link_single(&self, _: ServerId, _: ServerId) {}
+    fn unclog_link_single(&self, _: ServerId, _: ServerId) {}
     fn size(&self) -> usize {
         self.size
     }
@@ -130,10 +151,14 @@ pub fn intergration_test_without_nemesis() -> Result<()> {
     let mut rt = madsim::runtime::Runtime::new();
     rt.set_allow_system_thread(true); // needed by j4rs
 
-    let cluster = TestCluster::new();
+    let cluster = Arc::new(TestCluster::new());
     let raw_gen = ElleRwGenerator::new()?;
-    let client = JepsenClient::new(cluster, NemesisRawGenWrapper(Box::new(raw_gen)));
-    let client = Box::leak(client.into());
+    let jepsen_client = JepsenClient::new(
+        cluster.clone(),
+        TestClient(cluster),
+        NemesisRawGenWrapper(Box::new(raw_gen)),
+    );
+    let client = Box::leak(jepsen_client.into());
     info!("intergration_test: client created");
 
     rt.block_on(async move {
@@ -166,9 +191,15 @@ fn intergration_test_with_nemesis() -> Result<()> {
     let mut rt = madsim::runtime::Runtime::new();
     rt.set_allow_system_thread(true); // needed by j4rs
 
-    let cluster = rt.block_on(async move { TestCluster::new_with_handles().await });
+    let cluster = Arc::new(TestCluster::new());
     let raw_gen = ElleRwGenerator::new()?;
-    let client = JepsenClient::new(cluster, NemesisRawGenWrapper(Box::new(raw_gen)));
+    let client = JepsenClient::new(
+        cluster.clone(),
+        TestClient(cluster),
+        NemesisRawGenWrapper(Box::new(raw_gen)),
+    )
+    // here we allow 2 nemeses at the same time.
+    .with_n_register_strategy(NemesisRegisterStrategy::FIFO(2));
     let client = Box::leak(client.into());
     info!("intergration_test: client created");
 
@@ -180,7 +211,13 @@ fn intergration_test_with_nemesis() -> Result<()> {
             .await;
         let g2 = client.new_generator(50);
         let g3 = client.new_generator(50);
-        let ng = client.new_nemeses([NemesisType::Kill([1, 2].into_iter().collect())]);
+
+        // 2 nemeses. the 2 will be both active, so the get/put after second nemesis
+        // will fail.
+        let ng = client.new_nemeses([
+            NemesisType::Kill([1, 2].into_iter().collect()),
+            NemesisType::Kill([3, 4].into_iter().collect()),
+        ]);
         info!("intergration_test: generators created");
         let gen_g = GeneratorGroup::new_with_count([(g1, 20), (g2, 10), (g3, 10), (ng, 1)])
             .with_strategy(GeneratorGroupStrategy::RoundRobin(usize::MAX));
