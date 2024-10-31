@@ -1,0 +1,229 @@
+use std::{
+    fmt,
+    sync::{Arc, Mutex},
+};
+
+use anyhow::Result;
+use log::{debug, info, trace};
+
+use crate::{
+    checker::{elle_rw::ElleRwChecker, Check, CheckOption, SerializableCheckResult},
+    generator::{
+        context::HistoryProcess, Generator, GeneratorBuilder, GeneratorIter, Global, RawGenerator,
+    },
+    history::HistoryType,
+    nemesis::{
+        implementation::{NemesisCalculator, NemesisCluster, NemesisExecutor},
+        register::{NemesisRegister, NemesisRegisterStrategy},
+        AllNemesis, NemesisType,
+    },
+    op::{nemesis::OpOrNemesis, Op},
+};
+
+/// The interface of a cluster client, needs to be implemented by the external
+/// user.
+#[async_trait::async_trait]
+pub trait ElleRwClusterClient {
+    async fn get(&self, key: u64) -> std::result::Result<Option<u64>, String>;
+    async fn put(&self, key: u64, value: u64) -> std::result::Result<(), String>;
+    async fn txn(&self, ops: Vec<Op>) -> std::result::Result<Vec<Op>, String>;
+}
+
+/// The interface of a jepsen client.
+#[async_trait::async_trait]
+pub trait Client<U: Send + fmt::Debug = OpOrNemesis> {
+    type ERR: Send + 'static;
+    /// client received an op, send it to cluster and deal the result. The
+    /// history (both invoke and result) will be recorded in this function.
+    async fn handle_op(&'static self, id: u64, op: U);
+    async fn run(
+        &'static self,
+        gen: impl GeneratorIter<Item = U> + Send,
+    ) -> Result<SerializableCheckResult, Self::ERR>;
+    fn new_generator(&self, n: usize) -> Generator<'static, U, Self::ERR>;
+    fn new_nemeses(
+        &self,
+        nemesis_seq: impl IntoIterator<Item = NemesisType> + Send,
+    ) -> Generator<'static, OpOrNemesis, Self::ERR>;
+}
+
+/// A client that leads the jepsen test, execute between the generator and the
+/// cluster, and record the history file.
+pub struct JepsenClient<EC: ElleRwClusterClient + Send + Sync + 'static> {
+    /// A cluster client to put/get the op
+    cluster_client: EC,
+    /// A global context to record history
+    pub global: Arc<Global<'static, OpOrNemesis, <Self as Client>::ERR>>,
+    /// A nemesis register to recover the nemeses
+    pub n_register: Mutex<NemesisRegister>,
+    /// A nemesis cluster to execute the nemeses. Currently this is the complete
+    /// `XlineGroup`.
+    nemesis_cluster: Arc<dyn NemesisCluster + Send + Sync>,
+}
+
+impl<EC: ElleRwClusterClient + Send + Sync + 'static> JepsenClient<EC> {
+    /// Create a Jepsen client.
+    ///
+    /// # Arguments
+    ///
+    /// * `cluster` - a Arc of a cluster, to execute nemeses and get some
+    ///   information.
+    /// * `cluster_client` - a cluster client to put/get/txn with the op
+    /// * `raw_gen` - a RawGenerator to build generators.
+    pub fn new(
+        cluster: Arc<dyn NemesisCluster + Send + Sync>,
+        cluster_client: EC,
+        raw_gen: impl RawGenerator<Item = OpOrNemesis> + Send + 'static,
+    ) -> Self {
+        Self {
+            nemesis_cluster: cluster,
+            cluster_client,
+            global: Arc::new(Global::new(raw_gen)),
+            n_register: NemesisRegister::default().into(),
+        }
+    }
+
+    /// Set nemesis register strategy.
+    pub fn with_n_register_strategy(self, strategy: NemesisRegisterStrategy) -> Self {
+        self.n_register.lock().unwrap().set_strategy(strategy);
+        self
+    }
+
+    /// Recursively handle an op, return the result.
+    #[allow(clippy::await_holding_lock)]
+    #[async_recursion::async_recursion]
+    pub async fn handle_op_inner(&self, op: Op) -> std::result::Result<Op, String> {
+        match op {
+            Op::Read(key, _) => {
+                let value = self.cluster_client.get(key).await?;
+                Ok(Op::Read(key, value))
+            }
+            Op::Write(key, value) => {
+                self.cluster_client.put(key, value).await?;
+                Ok(Op::Write(key, value))
+            }
+            Op::Txn(ops) => Ok(Op::Txn(self.cluster_client.txn(ops).await?)),
+        }
+    }
+}
+
+#[async_trait::async_trait]
+impl<EC: ElleRwClusterClient + Send + Sync + 'static> Client<OpOrNemesis> for JepsenClient<EC> {
+    type ERR = String;
+
+    /// take n Ops from Global [`RawGenerator`].
+    fn new_generator(&self, n: usize) -> Generator<'static, OpOrNemesis, Self::ERR> {
+        debug!("Jepsen client make new generator with {} ops", n);
+        let global = self.global.clone();
+        let seq = global.take_seq(n);
+        GeneratorBuilder::new(global)
+            .seq(tokio_stream::iter(seq))
+            .build()
+    }
+
+    /// Create a Nemesis generator from given nemeses sequence.
+    fn new_nemeses(
+        &self,
+        nemesis_seq: impl IntoIterator<Item = NemesisType> + Send,
+    ) -> Generator<'static, OpOrNemesis, Self::ERR> {
+        debug!("Jepsen client make new nemesis generator");
+        let global = self.global.clone();
+        let seq = tokio_stream::iter(
+            nemesis_seq
+                .into_iter()
+                .map(OpOrNemesis::from)
+                .collect::<Vec<_>>(),
+        );
+        GeneratorBuilder::new(global).seq(seq).build()
+    }
+
+    /// Handle an [`OpOrNemesis`] which generated by a generator, and record it
+    /// to history.
+    async fn handle_op(&'static self, id: u64, op: OpOrNemesis) {
+        trace!(
+            "Jepsen client thread {} receive and handles an op: {:?}",
+            id,
+            op
+        );
+        match op {
+            OpOrNemesis::Op(op) => {
+                self.global
+                    .history
+                    .lock()
+                    .unwrap()
+                    .push_invoke(&self.global, id, op.clone());
+                let res = self.handle_op_inner(op.clone()).await;
+                match res {
+                    Ok(op) => {
+                        self.global.history.lock().unwrap().push_result(
+                            &self.global,
+                            id,
+                            HistoryType::Ok,
+                            op,
+                            None,
+                        );
+                    }
+                    Err(err) => {
+                        self.global.history.lock().unwrap().push_result(
+                            &self.global,
+                            id,
+                            HistoryType::Fail,
+                            op,
+                            Some(err),
+                        );
+                    }
+                }
+            }
+            OpOrNemesis::Nemesis(n) =>
+            // TODO: use `get_or_init` when async clojure stablized
+            {
+                let nemesis_type = match n {
+                    AllNemesis::Execute(n) => n,
+                    AllNemesis::Recover(_) => {
+                        // TODO: remove recover type in AllNemesis
+                        panic!("generated nemesis should not be a recover operation")
+                    }
+                };
+                let calced = self
+                    .nemesis_cluster
+                    .calculate_nemesis(nemesis_type.clone())
+                    .await;
+                let (exec, recov) = self.n_register.lock().unwrap().put(calced);
+                if let Some(recov) = recov {
+                    if exec != recov {
+                        // recover first, then execute
+                        self.nemesis_cluster.recover_rec(recov.clone()).await;
+                        self.global.push_nemesis(recov.into());
+                        self.nemesis_cluster.execute_rec(exec).await;
+                        self.global.push_nemesis(nemesis_type.into());
+                    }
+                } else {
+                    // execute only
+                    self.nemesis_cluster.execute_rec(exec.clone()).await;
+                    self.global.push_nemesis(nemesis_type.into());
+                }
+            }
+        }
+    }
+
+    // There will be only one thread to run start_test, so the `join_handles` lock
+    // will be held only by one thread, which could be safely held across await
+    // point.
+    #[allow(clippy::await_holding_lock)]
+    async fn run(
+        &'static self,
+        mut gen: impl GeneratorIter<Item = OpOrNemesis> + Send,
+    ) -> Result<SerializableCheckResult, Self::ERR> {
+        while let Some((op, id)) = gen.next_with_id().await {
+            self.handle_op(id, op).await;
+        }
+        info!("all receiver threads exited, check result...");
+
+        // let his = serde_json::to_string(&self.global.history.lock().unwrap().
+        // deref()).unwrap(); std::fs::write("test.json", his);
+
+        let check_result = ElleRwChecker::default()
+            .check(&self.global.history.lock().unwrap(), CheckOption::default());
+        check_result.map_err(|err| err.to_string())
+    }
+}

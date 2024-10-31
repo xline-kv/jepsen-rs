@@ -1,0 +1,39 @@
+{:valid? false,
+ :anomaly-types [:G1c],
+ :anomalies
+ {:G1c
+  [{:cycle
+    [{:process 1,
+      :type :ok,
+      :f nil,
+      :value [[:append :x 2] [:append :y 1]],
+      :index 1,
+      :time -1}
+     {:process 0,
+      :type :ok,
+      :f nil,
+      :value [[:append :x 1] [:r :y [1]]],
+      :index 0,
+      :time -1}
+     {:process 1,
+      :type :ok,
+      :f nil,
+      :value [[:append :x 2] [:append :y 1]],
+      :index 1,
+      :time -1}],
+    :steps
+    ({:type :wr, :key :y, :value 1, :a-mop-index 1, :b-mop-index 1}
+     {:type :ww,
+      :key :x,
+      :value 1,
+      :value' 2,
+      :a-mop-index 0,
+      :b-mop-index 0}),
+    :type :G1c}]},
+ :not #{:read-committed},
+ :also-not
+ #{:consistent-view :cursor-stability :forward-consistent-view
+   :monotonic-atomic-view :monotonic-snapshot-read :monotonic-view
+   :repeatable-read :serializable :snapshot-isolation :strong-serializable
+   :strong-session-serializable :strong-session-snapshot-isolation
+   :strong-snapshot-isolation :update-serializable}}
